@@ -1,0 +1,10 @@
+# 本機跑單元測試用的輕量相依 (不含 faster-whisper / CUDA 套件)。
+# 測試以假的 Transcriber 取代模型，因此不需要 GPU。
+#   uv venv .venv && uv pip install --python .venv/bin/python -r requirements-dev.txt
+#   .venv/bin/python -m pytest
+fastapi==0.115.5
+python-multipart==0.0.17
+requests==2.32.3
+feedparser==6.0.11
+httpx
+pytest
