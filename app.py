@@ -313,7 +313,18 @@ async def lifespan(app: FastAPI):
     JOB_QUEUE.put(None)  # 通知 worker 結束
 
 
-app = FastAPI(title="Podcast STT", lifespan=lifespan)
+app = FastAPI(
+    title="Podcast STT",
+    version="1.0.0",
+    description=(
+        "語音轉文字服務。所有轉檔請求 (檔案 / YouTube 連結 / RSS) 都會排進單一佇列，"
+        "由一個 worker 依序處理，不會因為「使用中」而被拒絕。\n\n"
+        "**使用流程**：POST 任一轉檔端點 → 取得 `job_id` → 輪詢 `GET /job/{job_id}` "
+        "直到 `status` 變成 `done`，即可從 `text` 取得逐字稿。逐字稿同時會存到 "
+        "`output/{日期}/{topic}.txt`。"
+    ),
+    lifespan=lifespan,
+)
 
 
 def _job_view(rec: dict, include_text: bool) -> dict:
@@ -620,8 +631,9 @@ def _batch_opts() -> str:
     return html
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get("/", response_class=HTMLResponse, tags=["系統"], summary="Web UI 操作介面")
 def index():
+    """瀏覽器操作介面：上傳檔案 / 貼連結 / 訂閱 RSS，以及「任務」分頁查看 48 小時內的 job。"""
     return (
         PAGE.replace("__MODEL__", MODEL)
         .replace("__DEVICE__", DEVICE)
@@ -631,19 +643,26 @@ def index():
     )
 
 
-@app.get("/health")
+@app.get("/health", tags=["系統"], summary="健康檢查")
 def health():
+    """回報服務狀態、目前載入的模型 / 裝置 / 預設批次大小，以及佇列中待處理的 job 數量。"""
     return {"status": "ok", "model": MODEL, "device": DEVICE, "batch_size": BATCH_SIZE,
             "queue_size": JOB_QUEUE.qsize()}
 
 
-@app.get("/gpu")
+@app.get("/gpu", tags=["系統"], summary="GPU 即時狀態")
 def gpu():
+    """讀取 nvidia-smi：GPU 使用率、VRAM 用量、功耗、溫度。容器若讀不到 GPU 則 `available` 為 false。"""
     return gpu_stats()
 
 
-@app.get("/jobs")
+@app.get("/jobs", tags=["任務查詢"], summary="列出近 48 小時的 job")
 def jobs():
+    """回傳過去 48 小時內所有 job 的摘要 (最新在前) 與目前佇列長度。
+
+    每筆含 `id` / `type` / `status` / `topic` / 時間戳；`done` 的附 `txt_file`、
+    `error` 的附 `error`。不含逐字稿全文 —— 要全文請打 `GET /job/{job_id}`。
+    """
     cutoff = (
         datetime.datetime.now() - datetime.timedelta(hours=JOBS_WINDOW_HOURS)
     ).isoformat(timespec="seconds")
@@ -657,8 +676,16 @@ def jobs():
     return {"jobs": items, "queue_size": JOB_QUEUE.qsize()}
 
 
-@app.get("/job/{job_id}")
+@app.get("/job/{job_id}", tags=["任務查詢"], summary="查詢單一 job 狀態與結果")
 def get_job(job_id: str):
+    """查詢單一 job (job_id 為 POST 轉檔端點回傳的值)。
+
+    - `status` 為 `queued` / `running`：仍在處理中，稍後再輪詢。
+    - `status` 為 `done`：附上 `language` / `duration` / `text` (逐字稿全文) /
+      `txt_file` / `srt_file`。
+    - `status` 為 `error`：附上 `error` 錯誤訊息。
+    - job 不存在或已超過保留期：回 404。
+    """
     with JOBS_LOCK:
         rec = JOBS.get(job_id)
         if rec is None:
@@ -666,13 +693,15 @@ def get_job(job_id: str):
         return _job_view(rec, include_text=True)
 
 
-@app.post("/transcribe", status_code=202)
+@app.post("/transcribe", status_code=202, tags=["轉檔"],
+          summary="上傳本地音檔轉文字")
 async def transcribe(
-    file: UploadFile = File(...),
-    language: str = Form(""),
-    batch_size: int = Form(BATCH_SIZE),
-    topic: str = Form(""),
+    file: UploadFile = File(..., description="音檔 (mp3 / m4a / wav / 影片檔皆可)"),
+    language: str = Form("", description="語言代碼，如 zh / en / ja；留空自動偵測"),
+    batch_size: int = Form(BATCH_SIZE, description="批次大小，越大越快越耗 VRAM；1 為不批次"),
+    topic: str = Form("", description="輸出檔名 output/{日期}/{topic}.txt；留空用上傳檔名"),
 ):
+    """上傳音檔加入轉檔佇列。立即回傳 `job_id`，請輪詢 `GET /job/{job_id}` 取得結果。"""
     suffix = pathlib.Path(file.filename).suffix or ".audio"
     fd, tmp_path = tempfile.mkstemp(suffix=suffix)
     with os.fdopen(fd, "wb") as fh:
@@ -681,24 +710,31 @@ async def transcribe(
     return {"job_id": job_id, "status": "queued"}
 
 
-@app.post("/transcribe_url", status_code=202)
+@app.post("/transcribe_url", status_code=202, tags=["轉檔"],
+          summary="從 YouTube / 影音連結轉文字")
 def transcribe_url(
-    url: str = Form(...),
-    language: str = Form(""),
-    batch_size: int = Form(BATCH_SIZE),
-    topic: str = Form(""),
+    url: str = Form(..., description="YouTube 或其他影音 / podcast 單集網址，由 yt-dlp 抽取音訊"),
+    language: str = Form("", description="語言代碼，如 zh / en / ja；留空自動偵測"),
+    batch_size: int = Form(BATCH_SIZE, description="批次大小，越大越快越耗 VRAM；1 為不批次"),
+    topic: str = Form("", description="輸出檔名 output/{日期}/{topic}.txt；留空用影片標題"),
 ):
+    """貼一個影音網址加入轉檔佇列。立即回傳 `job_id`，請輪詢 `GET /job/{job_id}` 取得結果。"""
     job_id = new_job("url", topic, language, batch_size, url)
     return {"job_id": job_id, "status": "queued"}
 
 
-@app.post("/transcribe_feed", status_code=202)
+@app.post("/transcribe_feed", status_code=202, tags=["轉檔"],
+          summary="從 Podcast RSS 批次轉文字")
 def transcribe_feed(
-    feed_url: str = Form(...),
-    limit: int = Form(0),
-    language: str = Form(""),
-    batch_size: int = Form(BATCH_SIZE),
+    feed_url: str = Form(..., description="Podcast RSS feed 網址"),
+    limit: int = Form(0, description="抓最新幾集；0 表示整季全抓"),
+    language: str = Form("", description="語言代碼，如 zh / en / ja；留空自動偵測"),
+    batch_size: int = Form(BATCH_SIZE, description="批次大小，越大越快越耗 VRAM；1 為不批次"),
 ):
+    """解析 RSS，將每一集各自加入佇列 (每集一個獨立 job)。
+
+    立即回傳 `feed_job_ids` (所有 job_id 清單) 與 `count`。每集的 topic 自動用單集標題。
+    """
     try:
         episodes = feed_episodes(feed_url, limit)
     except Exception as e:
