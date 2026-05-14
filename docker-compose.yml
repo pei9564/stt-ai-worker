@@ -1,0 +1,23 @@
+services:
+  stt:
+    build: .
+    container_name: podcast-stt
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - ./output:/data/output
+      - model-cache:/root/.cache/huggingface
+    restart: unless-stopped
+    # GPU 模式 (.env 設 DEVICE=cuda 時需要)。
+    # 若要改成純 CPU，把 .env 的 DEVICE 改成 cpu，並可註解掉下面整段 deploy。
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  model-cache:
