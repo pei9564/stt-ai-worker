@@ -38,9 +38,12 @@ _BATCH_DESC = "批次大小，越大越快越耗 VRAM；1 為不批次"
 
 # ---- 系統 ----
 @router.get("/", response_class=HTMLResponse, tags=["系統"], summary="Web UI 操作介面")
-def index(container: Container = Depends(get_container)) -> str:
+def index(container: Container = Depends(get_container)) -> HTMLResponse:
     """瀏覽器操作介面：上傳檔案 / 貼連結 / 訂閱 RSS，以及「任務」分頁查看 48 小時內的 job。"""
-    return container.web_ui.render_index()
+    return HTMLResponse(
+        content=container.web_ui.render_index(),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/health", tags=["系統"], summary="健康檢查")
