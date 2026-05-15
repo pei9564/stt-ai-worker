@@ -91,6 +91,16 @@ class JobService:
                     job.mark_error("服務重啟，job 未完成")
                     self._repo.save(job)
 
+    def cancel(self, job_id: str) -> bool:
+        """把單一 queued job 標記為 error。回傳 True 表示成功取消，False 表示不在排隊中。"""
+        with self._lock:
+            job = self._repo.get(job_id)
+            if job is None or job.status != JobStatus.QUEUED:
+                return False
+            job.mark_error("使用者取消")
+            self._repo.save(job)
+        return True
+
     def cancel_all_queued(self) -> int:
         """把所有排隊中的 job 標記為 error。回傳取消筆數。
 

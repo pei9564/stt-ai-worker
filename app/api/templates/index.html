@@ -233,6 +233,17 @@ async function renderJobs() {
         `<span class="hint">${j.type} · ${when}</span>`;
       if (j.status === 'done') {
         row.onclick = () => viewJobResult(j.id);
+      } else if (j.status === 'queued') {
+        const btn = document.createElement('button');
+        btn.textContent = '取消';
+        btn.style.cssText = 'padding:1px 8px;font-size:0.75rem;margin-left:8px;cursor:pointer;';
+        btn.onclick = async (e) => {
+          e.stopPropagation();
+          btn.disabled = true;
+          await fetch('/job/' + j.id + '/cancel', { method: 'POST' });
+          renderJobs();
+        };
+        row.appendChild(btn);
       } else if (j.status === 'error') {
         const err = document.createElement('div');
         err.className = 'hint';

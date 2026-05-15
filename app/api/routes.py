@@ -69,6 +69,17 @@ def jobs(container: Container = Depends(get_container)) -> JobListResponse:
     return JobListResponse(jobs=views, queue_size=container.job_service.queue_size)
 
 
+@router.post("/job/{job_id}/cancel", tags=["任務查詢"], summary="取消單一排隊中的 job")
+def cancel_job(job_id: str, container: Container = Depends(get_container)):
+    """把單一 queued job 標記為 error。正在執行中的 job 無法取消（409）。"""
+    job = container.job_service.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if not container.job_service.cancel(job_id):
+        raise HTTPException(status_code=409, detail="job 不在排隊中，無法取消")
+    return {"job_id": job_id, "status": "cancelled"}
+
+
 @router.post("/jobs/cancel-all", tags=["任務查詢"], summary="取消所有排隊中的 job")
 def cancel_all(container: Container = Depends(get_container)) -> CancelAllResponse:
     """把所有 queued 狀態的 job 標記為 error。正在執行中的 job 無法中斷，會跑完。"""
