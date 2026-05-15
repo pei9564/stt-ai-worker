@@ -45,6 +45,13 @@ class JobView(BaseModel):
     error: str | None = None
 
 
+class CancelAllResponse(BaseModel):
+    """POST /jobs/cancel-all 的回應。"""
+
+    cancelled: int
+    message: str
+
+
 class JobListResponse(BaseModel):
     """GET /jobs 的回應。"""
 

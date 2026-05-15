@@ -11,6 +11,7 @@ from fastapi.responses import HTMLResponse
 
 from app.api.deps import get_container
 from app.api.schemas import (
+    CancelAllResponse,
     FeedQueued,
     HealthResponse,
     JobCreated,
@@ -66,6 +67,13 @@ def jobs(container: Container = Depends(get_container)) -> JobListResponse:
     """回傳時間窗內所有 job 的摘要 (最新在前) 與目前佇列長度。不含逐字稿全文。"""
     views = [to_job_view(job, include_text=False) for job in container.job_service.list_recent()]
     return JobListResponse(jobs=views, queue_size=container.job_service.queue_size)
+
+
+@router.post("/jobs/cancel-all", tags=["任務查詢"], summary="取消所有排隊中的 job")
+def cancel_all(container: Container = Depends(get_container)) -> CancelAllResponse:
+    """把所有 queued 狀態的 job 標記為 error。正在執行中的 job 無法中斷，會跑完。"""
+    n = container.job_service.cancel_all_queued()
+    return CancelAllResponse(cancelled=n, message=f"已取消 {n} 個排隊中的 job")
 
 
 @router.get("/job/{job_id}", tags=["任務查詢"], summary="查詢單一 job 狀態與結果")

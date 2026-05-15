@@ -91,6 +91,21 @@ class JobService:
                     job.mark_error("服務重啟，job 未完成")
                     self._repo.save(job)
 
+    def cancel_all_queued(self) -> int:
+        """把所有排隊中的 job 標記為 error。回傳取消筆數。
+
+        正在執行中的 job 無法中斷 (faster-whisper 不支援)，會跑完。
+        Worker 取到已取消的 job_id 時會自動跳過。
+        """
+        cancelled = 0
+        with self._lock:
+            for job in self._repo.all():
+                if job.status == JobStatus.QUEUED:
+                    job.mark_error("使用者取消")
+                    self._repo.save(job)
+                    cancelled += 1
+        return cancelled
+
     # ---- 佇列 ----
     def dequeue(self) -> str | None:
         """阻塞取出下一個 job_id；取到 None 代表收到關閉訊號。"""

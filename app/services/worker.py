@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import threading
 
+from app.domain.job import JobStatus
 from app.services.job_service import JobService
 from app.services.transcription import TranscriptionService
 
@@ -44,8 +45,8 @@ class TranscriptionWorker:
 
     def _process(self, job_id: str) -> None:
         job = self._jobs.get(job_id)
-        if job is None:
-            return
+        if job is None or job.status != JobStatus.QUEUED:
+            return  # 已取消或重複處理，跳過
         self._jobs.mark_running(job_id)
         log.info("job %s 開始 (%s)", job_id, job.type.value)
         try:

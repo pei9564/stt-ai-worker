@@ -90,6 +90,8 @@
 
   <div class="panel" id="panel-jobs">
     <p class="hint">過去 48 小時內的所有 job，每 5 秒自動更新。點「done」的項目可載入逐字稿。</p>
+    <button onclick="cancelAll()" style="margin-top:0; margin-bottom:12px; background:#c62828; color:#fff; border:none; border-radius:4px;">取消所有排隊中的 job</button>
+    <div id="cancelMsg" style="font-size:0.85rem; color:#555; margin-bottom:8px;"></div>
     <div id="jobsList">載入中…</div>
   </div>
 
@@ -185,6 +187,19 @@ async function startFeed() {
     }
   } catch (e) {
     fs.textContent = '錯誤: ' + e.message;
+  }
+}
+
+async function cancelAll() {
+  const msg = document.getElementById('cancelMsg');
+  msg.textContent = '取消中…';
+  try {
+    const r = await fetch('/jobs/cancel-all', { method: 'POST' });
+    const d = await r.json();
+    msg.textContent = d.message;
+    renderJobs();
+  } catch (e) {
+    msg.textContent = '取消失敗: ' + e.message;
   }
 }
 
