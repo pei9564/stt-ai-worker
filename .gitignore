@@ -217,9 +217,8 @@ __marimo__/
 .streamlit/secrets.toml
 
 # === Podcast STT 專案專屬 ===
-# 轉檔產出 (逐字稿) — 不進 repo
-output/*
-!output/.gitkeep
+# 轉檔產出 (逐字稿) — 不進 repo；app 啟動時會自動建目錄，不需 .gitkeep
+output/
 
 # 模型權重 — 一律不進 repo (權重存於 docker volume)
 *.bin
