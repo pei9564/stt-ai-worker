@@ -227,9 +227,10 @@ async function renderJobs() {
       const row = document.createElement('div');
       row.className = 'jobrow' + (j.status === 'done' ? ' clickable' : '');
       const when = (j.finished_at || j.created_at || '').replace('T', ' ');
+      const title = (j.topic || j.id).replace(/\.[a-zA-Z0-9]+$/, '');
       row.innerHTML =
         `<span class="badge ${j.status}">${j.status}</span>` +
-        `<b>${(j.topic || j.id)}</b> ` +
+        `<b>${title}</b> ` +
         `<span class="hint">${j.type} · ${when}</span>`;
       if (j.status === 'done') {
         row.onclick = () => viewJobResult(j.id);

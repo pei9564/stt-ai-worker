@@ -28,6 +28,7 @@ from app.infrastructure.audio_sources import (
     parse_feed,
 )
 from app.infrastructure.gpu import read_gpu_stats
+from app.infrastructure.naming import safe_stem
 
 router = APIRouter()
 
@@ -115,7 +116,7 @@ async def transcribe(
     job = container.job_service.create(
         job_type=JobType.FILE,
         source=source,
-        topic=topic,
+        topic=topic or safe_stem(file.filename or "audio"),  # 沒填 topic 就用檔名當 title
         language=language,
         batch_size=batch_size,
     )
