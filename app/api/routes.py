@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse
 from app.api.deps import get_container
 from app.api.schemas import (
     CancelAllResponse,
+    DeletedResponse,
     FeedQueued,
     HealthResponse,
     JobCreated,
@@ -71,6 +72,34 @@ def jobs(container: Container = Depends(get_container)) -> JobListResponse:
     """回傳時間窗內所有 job 的摘要 (最新在前) 與目前佇列長度。不含逐字稿全文。"""
     views = [to_job_view(job, include_text=False) for job in container.job_service.list_recent()]
     return JobListResponse(jobs=views, queue_size=container.job_service.queue_size)
+
+
+@router.delete("/job/{job_id}", tags=["任務查詢"], summary="刪除 job 紀錄並刪除輸出檔案")
+def delete_job(job_id: str, container: Container = Depends(get_container)) -> DeletedResponse:
+    """刪除 job 紀錄（JSON 持久化檔）以及對應的 .txt / .srt 輸出檔案。
+
+    - queued job：先取消（讓 worker 跳過）再刪除紀錄。
+    - running job：無法刪除，回 409。
+    - done / error job：直接刪除紀錄與輸出檔案。
+    """
+    job = container.job_service.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job.status.value == "running":
+        raise HTTPException(status_code=409, detail="job 執行中，無法刪除")
+    if job.status.value == "queued":
+        container.job_service.cancel(job_id)
+
+    removed: list[str] = []
+    if job.result:
+        for rel in (job.result.txt_file, job.result.srt_file):
+            path = container.settings.output_dir / rel
+            if path.exists():
+                path.unlink()
+                removed.append(rel)
+
+    container.job_service.delete(job_id)
+    return DeletedResponse(deleted=job_id, files_removed=removed)
 
 
 @router.post("/job/{job_id}/cancel", tags=["任務查詢"], summary="取消單一排隊中的 job")

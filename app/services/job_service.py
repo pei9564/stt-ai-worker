@@ -91,6 +91,14 @@ class JobService:
                     job.mark_error("服務重啟，job 未完成")
                     self._repo.save(job)
 
+    def delete(self, job_id: str) -> bool:
+        """從 repo 刪除一筆 job 紀錄。回傳 True 表示存在並已刪除。"""
+        with self._lock:
+            if self._repo.get(job_id) is None:
+                return False
+            self._repo.delete(job_id)
+        return True
+
     def cancel(self, job_id: str) -> bool:
         """把單一 queued job 標記為 error。回傳 True 表示成功取消，False 表示不在排隊中。"""
         with self._lock:

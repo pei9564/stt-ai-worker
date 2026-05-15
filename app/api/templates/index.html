@@ -238,22 +238,34 @@ async function renderJobs() {
       if (j.status === 'done') {
         row.onclick = () => viewJobResult(j.id);
       } else if (j.status === 'queued') {
-        const btn = document.createElement('button');
-        btn.textContent = '取消';
-        btn.style.cssText = 'padding:1px 8px;font-size:0.75rem;margin-left:8px;cursor:pointer;';
-        btn.onclick = async (e) => {
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = '取消';
+        cancelBtn.style.cssText = 'padding:1px 8px;font-size:0.75rem;margin-left:8px;cursor:pointer;';
+        cancelBtn.onclick = async (e) => {
           e.stopPropagation();
-          btn.disabled = true;
+          cancelBtn.disabled = true;
           await fetch('/job/' + j.id + '/cancel', { method: 'POST' });
           renderJobs();
         };
-        row.appendChild(btn);
+        row.appendChild(cancelBtn);
       } else if (j.status === 'error') {
         const err = document.createElement('div');
         err.className = 'hint';
         err.style.color = '#c62828';
         err.textContent = j.error || '';
         row.appendChild(err);
+      }
+      if (j.status !== 'running') {
+        const delBtn = document.createElement('button');
+        delBtn.textContent = '刪除';
+        delBtn.style.cssText = 'padding:1px 8px;font-size:0.75rem;margin-left:6px;cursor:pointer;color:#c62828;border-color:#c62828;';
+        delBtn.onclick = async (e) => {
+          e.stopPropagation();
+          delBtn.disabled = true;
+          await fetch('/job/' + j.id, { method: 'DELETE' });
+          renderJobs();
+        };
+        row.appendChild(delBtn);
       }
       box.appendChild(row);
     });

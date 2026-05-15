@@ -45,6 +45,13 @@ class JobView(BaseModel):
     error: str | None = None
 
 
+class DeletedResponse(BaseModel):
+    """DELETE /job/{id} 的回應。"""
+
+    deleted: str
+    files_removed: list[str]
+
+
 class CancelAllResponse(BaseModel):
     """POST /jobs/cancel-all 的回應。"""
 
