@@ -173,11 +173,16 @@ async function startFeed() {
   fd.append('limit', document.getElementById('feedLimit').value || '0');
   fd.append('language', document.getElementById('lang-feed').value);
   fd.append('batch_size', document.getElementById('batch-feed').value);
+  fs.textContent = '解析 RSS 中，請稍候…';
   try {
     const r = await fetch('/transcribe_feed', { method: 'POST', body: fd });
     const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || '送出失敗');
-    fs.textContent = `已排入 ${data.count} 集，到「任務」分頁追蹤進度`;
+    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+    if (data.count === 0) {
+      fs.textContent = '⚠ RSS 解析成功但找不到任何音檔集數（可能是 enclosure 格式不符）';
+    } else {
+      fs.textContent = `已排入 ${data.count} 集，到「任務」分頁追蹤進度`;
+    }
   } catch (e) {
     fs.textContent = '錯誤: ' + e.message;
   }
