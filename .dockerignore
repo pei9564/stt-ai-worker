@@ -1,0 +1,54 @@
+# Git / VCS
+.git
+.gitignore
+.gitattributes
+
+# Python build / cache
+__pycache__
+*.py[codz]
+*.so
+*.egg-info
+build/
+dist/
+.eggs/
+
+# Virtual envs
+.venv
+venv/
+env/
+
+# Test / lint caches
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+.coverage.*
+htmlcov/
+
+# IDE
+.vscode
+.idea
+
+# Local-only env / config (絕對不能進 image)
+.env
+.envrc
+.env.local
+
+# Local runtime data
+output/
+.pytest_cache/
+
+# Model weights (image 不烤模型, 由 PVC 提供)
+*.bin
+*.pt
+*.ckpt
+*.safetensors
+models/
+
+# Docs / dev-only files
+README.md
+docker-compose.yml
+requirements-dev.txt
+tests/
+.dockerignore
+Dockerfile

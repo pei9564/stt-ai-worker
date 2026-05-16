@@ -22,7 +22,7 @@ class TranscriptionWorker:
 
     def start(self) -> None:
         """啟動 worker thread。"""
-        self._thread = threading.Thread(target=self._loop, daemon=True, name="stt-worker")
+        self._thread = threading.Thread(target=self._loop, daemon=True, name="stt-ai-worker")
         self._thread.start()
 
     def stop(self) -> None:

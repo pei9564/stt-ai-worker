@@ -1,4 +1,4 @@
-# Podcast STT
+# STT Service
 
 語音轉文字服務。上傳音檔 / 貼 YouTube 連結 / 訂閱 Podcast RSS，由 faster-whisper
 轉成逐字稿。所有請求排進單一佇列，由一個 worker 依序處理 (序列化 GPU 存取)。

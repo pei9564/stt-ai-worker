@@ -89,7 +89,7 @@ def create_app(
             worker.stop()
 
     app = FastAPI(
-        title="Podcast STT",
+        title="STT Service",
         version="2.0.0",
         description=_DESCRIPTION,
         lifespan=lifespan,
