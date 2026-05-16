@@ -1,6 +1,8 @@
 services:
   stt-ai-worker:
-    image: stt-ai-worker:latest
+    # 預設拉 GHCR image；要本地 rebuild 就跑 `docker compose build` 或 `up --build`
+    image: ghcr.io/pei9564/stt-ai-worker:latest
+    build: .
     container_name: stt-ai-worker
     ports:
       - "8000:8000"
