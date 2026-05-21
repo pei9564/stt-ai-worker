@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse
 from app.api.deps import get_container
 from app.api.schemas import (
     CancelAllResponse,
+    CancelResponse,
     DeletedResponse,
     FeedQueued,
     HealthResponse,
@@ -103,14 +104,14 @@ def delete_job(job_id: str, container: Container = Depends(get_container)) -> De
 
 
 @router.post("/job/{job_id}/cancel", tags=["任務查詢"], summary="取消單一排隊中的 job")
-def cancel_job(job_id: str, container: Container = Depends(get_container)):
+def cancel_job(job_id: str, container: Container = Depends(get_container)) -> CancelResponse:
     """把單一 queued job 標記為 error。正在執行中的 job 無法取消（409）。"""
     job = container.job_service.get(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     if not container.job_service.cancel(job_id):
         raise HTTPException(status_code=409, detail="job 不在排隊中，無法取消")
-    return {"job_id": job_id, "status": "cancelled"}
+    return CancelResponse(job_id=job_id, status="cancelled")
 
 
 @router.post("/jobs/cancel-all", tags=["任務查詢"], summary="取消所有排隊中的 job")

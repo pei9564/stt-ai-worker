@@ -52,6 +52,13 @@ class DeletedResponse(BaseModel):
     files_removed: list[str]
 
 
+class CancelResponse(BaseModel):
+    """POST /job/{id}/cancel 的回應。"""
+
+    job_id: str
+    status: str
+
+
 class CancelAllResponse(BaseModel):
     """POST /jobs/cancel-all 的回應。"""
 
