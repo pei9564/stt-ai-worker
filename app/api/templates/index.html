@@ -169,17 +169,43 @@
   .btn-sm.danger:hover { background: var(--badge-error-bg); }
 
   /* Status & result */
-  #status, #feedStatus {
+  #feedStatus {
     margin-top: 16px;
     font-size: 0.85rem;
     color: var(--text-secondary);
     white-space: pre-wrap;
   }
 
+  /* 逐字稿輸出區:跟上方分頁拉開距離,並有自己的小標題列 */
+  .result-section {
+    margin-top: 32px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-light);
+  }
+  .result-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+    min-height: 1.4em;
+  }
+  .result-label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text);
+    letter-spacing: 0.02em;
+  }
+  #status {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    text-align: right;
+  }
+
   textarea {
     width: 100%;
     height: 280px;
-    margin-top: 14px;
     font-family: ui-monospace, monospace;
     font-size: 0.82rem;
     padding: 10px;
@@ -191,6 +217,7 @@
     outline: none;
   }
   textarea:focus { border-color: var(--accent); }
+  textarea::placeholder { color: var(--text-muted); }
 
   /* Jobs panel */
   .jobs-header {
@@ -271,51 +298,57 @@
 </div>
 
   <div class="panel active" id="panel-file">
-    <label>音檔 (mp3 / m4a / wav / …)</label>
+    <label>音檔</label>
     <input type="file" id="file" accept="audio/*,video/*">
     <label>語言</label>
     <select id="lang-file">__LANGOPTS__</select>
     <label>批次大小 <span class="hint">越大越快、GPU 越熱</span></label>
     <select id="batch-file">__BATCHOPTS__</select>
-    <label>Topic <span class="hint">選填；留空用檔名</span></label>
+    <label>標題 <span class="hint">選填,留空用檔名</span></label>
     <input type="text" id="topic-file" placeholder="(選填)">
-    <br><button class="btn btn-primary" onclick="doTranscribe('file')">加入佇列</button>
+    <button class="btn btn-primary" onclick="doTranscribe('file')">加入佇列</button>
   </div>
 
   <div class="panel" id="panel-url">
-    <label>YouTube 或影音 / podcast 單集網址</label>
+    <label>YouTube / Podcast 單集網址</label>
     <input type="text" id="url" placeholder="https://www.youtube.com/watch?v=…">
     <label>語言</label>
     <select id="lang-url">__LANGOPTS__</select>
     <label>批次大小 <span class="hint">越大越快、GPU 越熱</span></label>
     <select id="batch-url">__BATCHOPTS__</select>
-    <label>Topic <span class="hint">選填；留空用影片標題</span></label>
+    <label>標題 <span class="hint">選填,留空用影片標題</span></label>
     <input type="text" id="topic-url" placeholder="(選填)">
-    <br><button class="btn btn-primary" onclick="doTranscribe('url')">加入佇列</button>
+    <button class="btn btn-primary" onclick="doTranscribe('url')">加入佇列</button>
   </div>
 
   <div class="panel" id="panel-feed">
-    <label>Podcast RSS Feed 網址</label>
+    <label>RSS Feed 網址</label>
     <input type="text" id="feed" placeholder="https://…/feed.xml">
-    <label>抓幾集 <span class="hint">0 = 整季全抓，從最新往回</span></label>
+    <label>集數 <span class="hint">0 = 整季全抓 (從新到舊)</span></label>
     <input type="text" id="feedLimit" value="3" style="width:80px">
     <label>語言</label>
     <select id="lang-feed">__LANGOPTS__</select>
-    <label>批次大小 <span class="hint">整季長時間跑，建議 1~4 較不燒機</span></label>
+    <label>批次大小 <span class="hint">整季跑建議 1~4,較不燒機</span></label>
     <select id="batch-feed">__BATCHOPTS__</select>
-    <br><button class="btn btn-primary" onclick="startFeed()">加入佇列（每集一個 job）</button>
+    <p class="hint" style="margin:18px 0 0;">每集會建立獨立的 job,可在「任務」分頁追蹤。</p>
+    <button class="btn btn-primary" onclick="startFeed()">加入佇列</button>
     <div id="feedStatus"></div>
   </div>
 
   <div class="panel" id="panel-jobs">
-    <p class="hint" style="margin:0 0 12px;">過去 48 小時內的所有 job，每 5 秒自動更新。點「done」的項目可載入逐字稿。</p>
+    <p class="hint" style="margin:0 0 12px;">過去 48 小時的所有 job,每 5 秒更新;點任一已完成項目可載入逐字稿。</p>
     <button class="btn btn-danger" onclick="cancelAll()">取消所有排隊中的 job</button>
     <div id="cancelMsg"></div>
     <div id="jobsList">載入中…</div>
   </div>
 
-  <div id="status"></div>
-  <textarea id="result" placeholder="完成的逐字稿會顯示在這；所有結果都存到 output/{日期}/ 資料夾"></textarea>
+  <div class="result-section">
+    <div class="result-header">
+      <span class="result-label">逐字稿</span>
+      <span id="status"></span>
+    </div>
+    <textarea id="result" placeholder="完成後的逐字稿會顯示在這裡;原始紀錄存於 Postgres transcripts 表。"></textarea>
+  </div>
 
 <script>
 document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
@@ -365,19 +398,19 @@ function pollJob(jobId) {
     try {
       const d = await (await fetch('/job/' + jobId)).json();
       if (d.status === 'queued') {
-        statusEl.textContent = `job ${jobId} 排隊中…`;
+        statusEl.textContent = '排隊中…';
       } else if (d.status === 'running') {
-        statusEl.textContent = `job ${jobId} 轉檔中…`;
+        statusEl.textContent = '轉檔中…';
       } else if (d.status === 'done') {
         clearInterval(pollTimers[jobId]);
-        statusEl.textContent = `job ${jobId} 完成 | 語言 ${d.language} | 長度 ${d.duration.toFixed(1)}s | transcript #${d.transcript_id}`;
+        statusEl.textContent = `完成 · ${d.language} · ${d.duration.toFixed(1)}s`;
         resultEl.value = d.text;
       } else if (d.status === 'error') {
         clearInterval(pollTimers[jobId]);
-        statusEl.textContent = `job ${jobId} 失敗: ${d.error}`;
+        statusEl.textContent = '失敗: ' + d.error;
       }
     } catch (e) {
-      statusEl.textContent = 'job 查詢失敗: ' + e.message;
+      statusEl.textContent = '查詢失敗: ' + e.message;
     }
   };
   pollTimers[jobId] = setInterval(tick, 3000);
@@ -393,15 +426,15 @@ async function startFeed() {
   fd.append('limit', document.getElementById('feedLimit').value || '0');
   fd.append('language', document.getElementById('lang-feed').value);
   fd.append('batch_size', document.getElementById('batch-feed').value);
-  fs.textContent = '解析 RSS 中，請稍候…';
+  fs.textContent = '解析 RSS 中…';
   try {
     const r = await fetch('/transcribe_feed', { method: 'POST', body: fd });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
     if (data.count === 0) {
-      fs.textContent = '⚠ RSS 解析成功但找不到任何音檔集數（可能是 enclosure 格式不符）';
+      fs.textContent = 'RSS 解析成功,但找不到音檔 (enclosure 格式可能不符)';
     } else {
-      fs.textContent = `已排入 ${data.count} 集，到「任務」分頁追蹤進度`;
+      fs.textContent = `已排入 ${data.count} 集,到「任務」分頁追蹤進度`;
     }
   } catch (e) {
     fs.textContent = '錯誤: ' + e.message;
@@ -525,16 +558,16 @@ async function renderJobs() {
       box.appendChild(row);
     });
   } catch (e) {
-    box.textContent = 'job 清單載入失敗: ' + e.message;
+    box.textContent = '載入失敗: ' + e.message;
   }
 }
 
 async function viewJobResult(jobId) {
-  statusEl.textContent = '載入逐字稿…';
+  statusEl.textContent = '載入中…';
   try {
     const d = await (await fetch('/job/' + jobId)).json();
-    if (d.status !== 'done') { statusEl.textContent = `job ${jobId} 狀態: ${d.status}`; return; }
-    statusEl.textContent = `job ${jobId} | 語言 ${d.language} | 長度 ${d.duration.toFixed(1)}s | transcript #${d.transcript_id}`;
+    if (d.status !== 'done') { statusEl.textContent = '狀態: ' + d.status; return; }
+    statusEl.textContent = `${d.language} · ${d.duration.toFixed(1)}s`;
     resultEl.value = d.text;
   } catch (e) {
     statusEl.textContent = '載入失敗: ' + e.message;
@@ -547,7 +580,7 @@ async function pollGpu() {
     const d = await (await fetch('/gpu')).json();
     if (!d.available) { el.textContent = 'GPU: 無法讀取 ' + (d.error || ''); return; }
     const pwr = d.power != null ? d.power.toFixed(0) + 'W' : 'N/A';
-    el.textContent = `GPU  使用率 ${d.util}%   VRAM ${d.mem_used.toFixed(0)}/${d.mem_total.toFixed(0)} MiB   功耗 ${pwr}   溫度 ${d.temp.toFixed(0)}°C`;
+    el.textContent = `GPU · 使用率 ${d.util}% · VRAM ${d.mem_used.toFixed(0)}/${d.mem_total.toFixed(0)} MiB · 功耗 ${pwr} · 溫度 ${d.temp.toFixed(0)}°C`;
     el.className = 'gpubar' + (d.temp >= 85 ? ' hot' : d.temp >= 75 ? ' warm' : '');
   } catch (e) {
     el.textContent = 'GPU: 連線失敗';

@@ -10,8 +10,8 @@ docker compose up -d --build
 ```
 
 開 <http://localhost:8000> 操作，API 文件在 <http://localhost:8000/docs>。
-設定改 `.env` (模型 / 裝置 / 批次大小 / 語言)；改完 `docker compose up -d`。
-逐字稿輸出在 `output/{日期}/{topic}.{txt,srt}`。
+設定改 `.env` (模型 / 裝置 / 批次大小 / 語言 / `DB_URL`)；改完 `docker compose up -d`。
+逐字稿與 job 狀態都存進 Postgres (`transcripts` / `jobs` 兩張表)；服務啟動時自動套用 `app/infrastructure/schema.sql`。
 
 ## 架構
 
@@ -28,16 +28,18 @@ app/
     job.py             Job / JobStatus / JobType / JobResult
     transcript.py      TranscriptResult / TranscriptSegment
     audio_source.py    AudioSource 抽象介面
-    ports.py           Transcriber / JobRepository 介面
+    ports.py           Transcriber / JobRepository / TranscriptRepository
   services/          使用情境，只依賴 domain port
     job_service.py     job 生命週期 + 佇列
-    transcription.py   取得音檔 → 轉文字 → 寫檔
+    transcription.py   取得音檔 → 轉文字 → 寫進 transcripts 表
     worker.py          背景 worker thread
   infrastructure/    與外部世界互動的實作
-    transcriber.py     faster-whisper 引擎 (延遲 import)
-    repository.py      JSON 檔 / 記憶體 job 儲存
-    audio_sources.py   yt-dlp / 直連下載 / RSS 解析
-    output_writer.py   逐字稿落地
+    transcriber.py            faster-whisper 引擎 (延遲 import)
+    repository.py             InMemoryJobRepository (測試用)
+    pg_job_repository.py      PostgresJobRepository (正式)
+    transcript_repository.py  InMemory / Postgres 兩版 transcript repo
+    schema.sql                啟動時套用,idempotent
+    audio_sources.py          yt-dlp / 直連下載 / RSS 解析
     gpu.py · srt.py · naming.py
   api/               FastAPI 路由 / 回應結構 / Web UI
     routes.py · schemas.py · deps.py · web.py
