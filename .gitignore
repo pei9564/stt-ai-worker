@@ -230,3 +230,6 @@ output/*
 *.ckpt
 *.safetensors
 models/
+
+# HuggingFace cache 預設位置 (HF_CACHE_DIR 未設時 fallback)
+hf_cache/
