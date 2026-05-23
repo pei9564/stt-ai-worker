@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import os
-import pathlib
-import tempfile
-
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse
 
 from app.api.deps import get_container
@@ -25,12 +21,10 @@ from app.container import Container
 from app.domain.job import JobType
 from app.infrastructure.audio_sources import (
     DirectUrlSource,
-    LocalFileSource,
     YtDlpSource,
     parse_feed,
 )
 from app.infrastructure.gpu import read_gpu_stats
-from app.infrastructure.naming import safe_stem
 
 router = APIRouter()
 
@@ -128,31 +122,6 @@ def get_job(job_id: str, container: Container = Depends(get_container)) -> JobVi
 
 
 # ---- 轉檔 ----
-@router.post("/transcribe", status_code=202, tags=["轉檔"], summary="上傳本地音檔轉文字")
-async def transcribe(
-    file: UploadFile = File(..., description="音檔 (mp3 / m4a / wav / 影片檔皆可)"),
-    language: str = Form("", description=_LANG_DESC),
-    batch_size: int = Form(0, description=_BATCH_DESC),
-    topic: str = Form("", description="transcript 的 topic 欄位；留空用上傳檔名"),
-    container: Container = Depends(get_container),
-) -> JobCreated:
-    """上傳音檔加入轉檔佇列。立即回傳 `job_id`，請輪詢 `GET /job/{job_id}` 取得結果。"""
-    suffix = pathlib.Path(file.filename or "").suffix or ".audio"
-    fd, tmp_path = tempfile.mkstemp(suffix=suffix)
-    with os.fdopen(fd, "wb") as fh:
-        fh.write(await file.read())
-
-    source = LocalFileSource(tmp_path, file.filename or "audio")
-    job = container.job_service.create(
-        job_type=JobType.FILE,
-        source=source,
-        topic=topic or safe_stem(file.filename or "audio"),  # 沒填 topic 就用檔名當 title
-        language=language,
-        batch_size=batch_size,
-    )
-    return JobCreated(job_id=job.id, status=job.status.value)
-
-
 @router.post("/transcribe_url", status_code=202, tags=["轉檔"], summary="從 YouTube / 影音連結轉文字")
 def transcribe_url(
     url: str = Form(..., description="YouTube 或其他影音 / podcast 單集網址，由 yt-dlp 抽取音訊"),

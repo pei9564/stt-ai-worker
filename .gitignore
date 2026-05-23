@@ -216,11 +216,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# === Podcast STT 專案專屬 ===
-# 轉檔產出 (逐字稿) — 不進 repo
-output/*
-!output/.gitkeep
-
+# === STT 專案專屬 ===
 # 本機環境變數 — 以 .env.example 為範本自行複製為 .env
 .env
 

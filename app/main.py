@@ -30,7 +30,7 @@ log = logging.getLogger(__name__)
 _SCHEMA_PATH = pathlib.Path(__file__).parent / "infrastructure" / "schema.sql"
 
 _DESCRIPTION = (
-    "語音轉文字服務。所有轉檔請求 (檔案 / YouTube 連結 / RSS) 都會排進單一佇列,"
+    "語音轉文字服務。所有轉檔請求 (YouTube 連結 / RSS) 都會排進單一佇列,"
     "由一個 worker 依序處理,不會因為「使用中」而被拒絕。\n\n"
     "**使用流程**:POST 任一轉檔端點 → 取得 `job_id` → 輪詢 `GET /job/{job_id}` "
     "直到 `status` 變成 `done`,即可從 `text` 取得逐字稿。逐字稿同時會存進 "

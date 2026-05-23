@@ -1,7 +1,6 @@
 """各種音檔來源的實作，以及 RSS feed 解析。
 
 每個 AudioSource 子類別把「如何取得本地音檔」封裝起來：
-  - LocalFileSource：使用者上傳、已落在暫存路徑的檔案
   - YtDlpSource：YouTube / 各影音站 / podcast 單集頁，用 yt-dlp 抽音訊
   - DirectUrlSource：直連音檔 URL (RSS enclosure 多半如此)
 """
@@ -53,25 +52,6 @@ Downloader = Callable[..., Path]
 
 
 # ---- AudioSource 實作 ----
-class LocalFileSource(AudioSource):
-    """使用者上傳、已寫入暫存路徑的音檔。用完即刪暫存。"""
-
-    def __init__(self, tmp_path: str | Path, original_name: str):
-        self._tmp_path = Path(tmp_path)
-        self._original_name = original_name
-
-    @property
-    def display_name(self) -> str:
-        return self._original_name
-
-    @contextmanager
-    def acquire(self) -> Iterator[Path]:
-        try:
-            yield self._tmp_path
-        finally:
-            self._tmp_path.unlink(missing_ok=True)
-
-
 class YtDlpSource(AudioSource):
     """YouTube / 影音 / podcast 單集網址，下載後的檔名 (通常是影片標題) 即 display_name。"""
 

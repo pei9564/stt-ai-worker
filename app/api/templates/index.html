@@ -291,25 +291,12 @@
 <div id="gpu" class="gpubar">GPU: 載入中…</div>
 
 <div class="tabs">
-  <div class="tab active" data-tab="file">本地檔案</div>
-  <div class="tab" data-tab="url">YouTube / 連結</div>
+  <div class="tab active" data-tab="url">YouTube / 連結</div>
   <div class="tab" data-tab="feed">RSS 整季</div>
   <div class="tab" data-tab="jobs">任務</div>
 </div>
 
-  <div class="panel active" id="panel-file">
-    <label>音檔</label>
-    <input type="file" id="file" accept="audio/*,video/*">
-    <label>語言</label>
-    <select id="lang-file">__LANGOPTS__</select>
-    <label>批次大小 <span class="hint">越大越快、GPU 越熱</span></label>
-    <select id="batch-file">__BATCHOPTS__</select>
-    <label>標題 <span class="hint">選填,留空用檔名</span></label>
-    <input type="text" id="topic-file" placeholder="(選填)">
-    <button class="btn btn-primary" onclick="doTranscribe('file')">加入佇列</button>
-  </div>
-
-  <div class="panel" id="panel-url">
+  <div class="panel active" id="panel-url">
     <label>YouTube / Podcast 單集網址</label>
     <input type="text" id="url" placeholder="https://www.youtube.com/watch?v=…">
     <label>語言</label>
@@ -318,7 +305,7 @@
     <select id="batch-url">__BATCHOPTS__</select>
     <label>標題 <span class="hint">選填,留空用影片標題</span></label>
     <input type="text" id="topic-url" placeholder="(選填)">
-    <button class="btn btn-primary" onclick="doTranscribe('url')">加入佇列</button>
+    <button class="btn btn-primary" onclick="doTranscribeUrl()">加入佇列</button>
   </div>
 
   <div class="panel" id="panel-feed">
@@ -363,27 +350,18 @@ const statusEl = document.getElementById('status');
 const resultEl = document.getElementById('result');
 const pollTimers = {};
 
-async function doTranscribe(mode) {
+async function doTranscribeUrl() {
+  const u = document.getElementById('url').value.trim();
+  if (!u) { statusEl.textContent = '請輸入網址'; return; }
   const fd = new FormData();
-  fd.append('language', document.getElementById('lang-' + mode).value);
-  fd.append('batch_size', document.getElementById('batch-' + mode).value);
-  fd.append('topic', document.getElementById('topic-' + mode).value.trim());
-  let url;
-  if (mode === 'file') {
-    const f = document.getElementById('file').files[0];
-    if (!f) { statusEl.textContent = '請先選擇音檔'; return; }
-    fd.append('file', f);
-    url = '/transcribe';
-  } else {
-    const u = document.getElementById('url').value.trim();
-    if (!u) { statusEl.textContent = '請輸入網址'; return; }
-    fd.append('url', u);
-    url = '/transcribe_url';
-  }
+  fd.append('url', u);
+  fd.append('language', document.getElementById('lang-url').value);
+  fd.append('batch_size', document.getElementById('batch-url').value);
+  fd.append('topic', document.getElementById('topic-url').value.trim());
   resultEl.value = '';
   statusEl.textContent = '送出中…';
   try {
-    const r = await fetch(url, { method: 'POST', body: fd });
+    const r = await fetch('/transcribe_url', { method: 'POST', body: fd });
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || '送出失敗');
     pollJob(data.job_id);

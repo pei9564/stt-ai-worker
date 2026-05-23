@@ -2,28 +2,8 @@ from pathlib import Path
 
 from app.infrastructure.audio_sources import (
     DirectUrlSource,
-    LocalFileSource,
     YtDlpSource,
 )
-
-
-def test_local_file_source_yields_path_then_deletes(tmp_path):
-    audio = tmp_path / "upload.mp3"
-    audio.write_bytes(b"data")
-    source = LocalFileSource(audio, "我的錄音.mp3")
-
-    assert source.display_name == "我的錄音.mp3"
-    with source.acquire() as path:
-        assert path == audio
-        assert path.exists()
-    assert not audio.exists()  # 暫存檔已清掉
-
-
-def test_local_file_source_cleanup_is_idempotent(tmp_path):
-    audio = tmp_path / "gone.mp3"
-    source = LocalFileSource(audio, "gone.mp3")
-    with source.acquire():
-        pass  # 檔案本來就不存在，不該炸
 
 
 def test_ytdlp_source_updates_display_name_after_download(tmp_path):

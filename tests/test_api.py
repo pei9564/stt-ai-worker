@@ -1,4 +1,3 @@
-import io
 import time
 
 import pytest
@@ -57,18 +56,18 @@ def test_transcribe_url_queues_job(client):
     assert client.get(f"/job/{body['job_id']}").json()["status"] == "queued"
 
 
-def test_transcribe_file_queues_job(client):
-    resp = client.post(
-        "/transcribe",
-        files={"file": ("test.mp3", io.BytesIO(b"audio-bytes"), "audio/mpeg")},
-        data={"topic": "上傳測試"},
+def test_end_to_end_url_transcription(settings, monkeypatch):
+    """跑滿整條路徑:URL → 佇列 → worker → 完成,逐字稿可取回。
+
+    routes 內的 YtDlpSource 換成 FakeAudioSource,測試不打網路也不裝 yt-dlp。
+    """
+    from app.api import routes
+    from tests.conftest import FakeAudioSource
+
+    monkeypatch.setattr(
+        routes, "YtDlpSource", lambda url: FakeAudioSource(display_name=url)
     )
-    assert resp.status_code == 202
-    assert resp.json()["status"] == "queued"
 
-
-def test_end_to_end_file_transcription(settings):
-    """跑滿整條路徑:上傳 → 佇列 → worker → 完成,逐字稿可取回。"""
     app = create_app(
         settings,
         transcriber=FakeTranscriber(),
@@ -78,9 +77,8 @@ def test_end_to_end_file_transcription(settings):
     )
     with TestClient(app) as client:
         job_id = client.post(
-            "/transcribe",
-            files={"file": ("ep.mp3", io.BytesIO(b"audio-bytes"), "audio/mpeg")},
-            data={"topic": "端到端"},
+            "/transcribe_url",
+            data={"url": "http://youtube/x", "topic": "端到端"},
         ).json()["job_id"]
 
         deadline = time.time() + 5
