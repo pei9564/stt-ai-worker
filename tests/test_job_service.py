@@ -66,7 +66,7 @@ def test_mark_transitions_update_status_and_persist():
     assert svc.get(job.id).started_at is not None
 
     result = JobResult(language="zh", duration=1.0, text="x",
-                       txt_file="a.txt", srt_file="a.srt")
+                       srt="1\n00:00:00,000 --> 00:00:01,000\nx\n", transcript_id=42)
     svc.mark_done(job.id, result)
     assert svc.get(job.id).status == JobStatus.DONE
     assert svc.get(job.id).result == result

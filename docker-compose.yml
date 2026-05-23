@@ -1,4 +1,19 @@
 services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: stt
+      POSTGRES_PASSWORD: stt
+      POSTGRES_DB: stt
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stt -d stt"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   stt-ai-worker:
     # 預設拉 GHCR image；要本地 rebuild 就跑 `docker compose build` 或 `up --build`
     image: ghcr.io/pei9564/stt-ai-worker:latest
@@ -8,10 +23,12 @@ services:
       - "8000:8000"
     env_file: .env
     volumes:
-      - ./output:/data/output
       # HF_CACHE_DIR: host 上的 HuggingFace model cache,避免每次重啟都重下載權重
       # 預設 ./hf_cache (compose 檔旁邊),也可指向系統共用 cache
       - ${HF_CACHE_DIR:-./hf_cache}:/root/.cache/huggingface
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     # GPU 模式 (.env 設 DEVICE=cuda 時需要)。
     # 若要改成純 CPU，把 .env 的 DEVICE 改成 cpu，並可註解掉下面整段 deploy。
@@ -22,3 +39,6 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+
+volumes:
+  pg_data:

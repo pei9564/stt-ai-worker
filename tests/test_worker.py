@@ -1,25 +1,25 @@
 import time
 
 from app.domain.job import JobStatus, JobType
-from app.infrastructure.output_writer import OutputWriter
 from app.infrastructure.repository import InMemoryJobRepository
+from app.infrastructure.transcript_repository import InMemoryTranscriptRepository
 from app.services.job_service import JobService
 from app.services.transcription import TranscriptionService
 from app.services.worker import TranscriptionWorker
 from tests.conftest import FakeAudioSource, FakeTranscriber
 
 
-def _build(tmp_path):
+def _build():
     job_service = JobService(InMemoryJobRepository(), jobs_window_hours=48)
     transcription = TranscriptionService(
-        FakeTranscriber(), OutputWriter(tmp_path),
+        FakeTranscriber(), InMemoryTranscriptRepository(),
         default_language="zh", default_batch_size=4,
     )
     return job_service, TranscriptionWorker(job_service, transcription)
 
 
-def test_process_marks_job_done(tmp_path):
-    job_service, worker = _build(tmp_path)
+def test_process_marks_job_done():
+    job_service, worker = _build()
     job = job_service.create(job_type=JobType.FILE, source=FakeAudioSource(),
                              topic="t", language="zh", batch_size=4)
 
@@ -30,8 +30,8 @@ def test_process_marks_job_done(tmp_path):
     assert done.result is not None
 
 
-def test_process_marks_job_error_on_failure(tmp_path):
-    job_service, worker = _build(tmp_path)
+def test_process_marks_job_error_on_failure():
+    job_service, worker = _build()
     job = job_service.create(job_type=JobType.FILE, source=FakeAudioSource(fail=True),
                              topic="t", language="zh", batch_size=4)
 
@@ -42,13 +42,13 @@ def test_process_marks_job_error_on_failure(tmp_path):
     assert "boom" in failed.error
 
 
-def test_process_unknown_job_is_noop(tmp_path):
-    _, worker = _build(tmp_path)
+def test_process_unknown_job_is_noop():
+    _, worker = _build()
     worker._process("ghost")  # 不該炸
 
 
-def test_worker_thread_drains_queue(tmp_path):
-    job_service, worker = _build(tmp_path)
+def test_worker_thread_drains_queue():
+    job_service, worker = _build()
     job = job_service.create(job_type=JobType.FILE, source=FakeAudioSource(),
                              topic="t", language="zh", batch_size=4)
 

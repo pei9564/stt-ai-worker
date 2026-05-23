@@ -28,13 +28,13 @@ class JobStatus(str, Enum):
 
 @dataclass(frozen=True)
 class JobResult:
-    """成功轉檔後的結果。txt_file / srt_file 是相對於 output_dir 的路徑。"""
+    """成功轉檔後的結果。transcript_id 指向 transcripts 表的 PK。"""
 
     language: str
     duration: float
     text: str
-    txt_file: str
-    srt_file: str
+    srt: str
+    transcript_id: int
 
 
 def _now() -> datetime.datetime:

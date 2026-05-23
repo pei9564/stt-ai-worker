@@ -58,15 +58,14 @@ class FakeAudioSource(AudioSource):
 
 
 @pytest.fixture
-def settings(tmp_path) -> Settings:
+def settings() -> Settings:
     return Settings(
         model="tiny",
         device="cpu",
         compute_type="int8",
         language="zh",
         batch_size=4,
-        output_dir=tmp_path / "output",
-        max_jobs=5,
+        db_url="postgresql://test:test@localhost/test",  # 測試不會真連線
         jobs_window_hours=48,
     )
 
@@ -74,3 +73,11 @@ def settings(tmp_path) -> Settings:
 @pytest.fixture
 def fake_transcriber() -> FakeTranscriber:
     return FakeTranscriber()
+
+
+@pytest.fixture
+def transcripts():
+    """InMemoryTranscriptRepository fixture，給單元測試替代 PG。"""
+    from app.infrastructure.transcript_repository import InMemoryTranscriptRepository
+
+    return InMemoryTranscriptRepository()

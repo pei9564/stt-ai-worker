@@ -40,8 +40,8 @@ class JobView(BaseModel):
     language: str | None = None
     duration: float | None = None
     text: str | None = None
-    txt_file: str | None = None
-    srt_file: str | None = None
+    srt: str | None = None
+    transcript_id: int | None = None
     error: str | None = None
 
 
@@ -49,7 +49,7 @@ class DeletedResponse(BaseModel):
     """DELETE /job/{id} 的回應。"""
 
     deleted: str
-    files_removed: list[str]
+    transcript_deleted: int | None = None
 
 
 class CancelResponse(BaseModel):
@@ -86,7 +86,7 @@ class HealthResponse(BaseModel):
 def to_job_view(job: Job, *, include_text: bool) -> JobView:
     """把 domain Job 轉成 API 回應。
 
-    include_text=False (清單) 時，done 的 job 只附 txt_file，不附逐字稿全文。
+    include_text=False (清單) 時，done 的 job 只附 transcript_id，不附逐字稿全文。
     """
     view = JobView(
         id=job.id,
@@ -98,12 +98,12 @@ def to_job_view(job: Job, *, include_text: bool) -> JobView:
         finished_at=_iso(job.finished_at),
     )
     if job.status == JobStatus.DONE and job.result is not None:
-        view.txt_file = job.result.txt_file
+        view.transcript_id = job.result.transcript_id
         if include_text:
             view.language = job.result.language
             view.duration = job.result.duration
             view.text = job.result.text
-            view.srt_file = job.result.srt_file
+            view.srt = job.result.srt
     elif job.status == JobStatus.ERROR:
         view.error = job.error
     return view

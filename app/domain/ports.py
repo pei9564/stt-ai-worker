@@ -41,3 +41,23 @@ class JobRepository(Protocol):
     def delete(self, job_id: str) -> None:
         """刪除一筆 job；不存在則無動作。"""
         ...
+
+
+class TranscriptRepository(Protocol):
+    """轉檔成品 (text + SRT) 的儲存。"""
+
+    def save(
+        self,
+        *,
+        topic: str,
+        text: str,
+        srt: str,
+        language: str,
+        duration: float,
+    ) -> int:
+        """寫入一筆 transcript，回傳 PK。"""
+        ...
+
+    def delete(self, transcript_id: int) -> None:
+        """刪除一筆 transcript；不存在則無動作。"""
+        ...

@@ -52,7 +52,7 @@ class TranscriptionWorker:
         try:
             result = self._transcription.process(job)
             self._jobs.mark_done(job_id, result)
-            log.info("job %s 完成 → %s", job_id, result.txt_file)
+            log.info("job %s 完成 → transcript #%d", job_id, result.transcript_id)
         except Exception as e:
             self._jobs.mark_error(job_id, str(e))
             log.error("job %s 失敗: %s", job_id, e)

@@ -75,13 +75,13 @@ def jobs(container: Container = Depends(get_container)) -> JobListResponse:
     return JobListResponse(jobs=views, queue_size=container.job_service.queue_size)
 
 
-@router.delete("/job/{job_id}", tags=["任務查詢"], summary="刪除 job 紀錄並刪除輸出檔案")
+@router.delete("/job/{job_id}", tags=["任務查詢"], summary="刪除 job 紀錄並刪除對應 transcript")
 def delete_job(job_id: str, container: Container = Depends(get_container)) -> DeletedResponse:
-    """刪除 job 紀錄（JSON 持久化檔）以及對應的 .txt / .srt 輸出檔案。
+    """刪除 job 紀錄以及對應的 transcripts 表列(若有)。
 
-    - queued job：先取消（讓 worker 跳過）再刪除紀錄。
-    - running job：無法刪除，回 409。
-    - done / error job：直接刪除紀錄與輸出檔案。
+    - queued job:先取消(讓 worker 跳過)再刪除紀錄。
+    - running job:無法刪除,回 409。
+    - done / error job:直接刪除紀錄;若有 transcript_id,連同 transcripts 表列一起刪。
     """
     job = container.job_service.get(job_id)
     if job is None:
@@ -91,16 +91,13 @@ def delete_job(job_id: str, container: Container = Depends(get_container)) -> De
     if job.status.value == "queued":
         container.job_service.cancel(job_id)
 
-    removed: list[str] = []
-    if job.result:
-        for rel in (job.result.txt_file, job.result.srt_file):
-            path = container.settings.output_dir / rel
-            if path.exists():
-                path.unlink()
-                removed.append(rel)
+    transcript_deleted: int | None = None
+    if job.result is not None:
+        container.transcripts.delete(job.result.transcript_id)
+        transcript_deleted = job.result.transcript_id
 
     container.job_service.delete(job_id)
-    return DeletedResponse(deleted=job_id, files_removed=removed)
+    return DeletedResponse(deleted=job_id, transcript_deleted=transcript_deleted)
 
 
 @router.post("/job/{job_id}/cancel", tags=["任務查詢"], summary="取消單一排隊中的 job")
@@ -136,7 +133,7 @@ async def transcribe(
     file: UploadFile = File(..., description="音檔 (mp3 / m4a / wav / 影片檔皆可)"),
     language: str = Form("", description=_LANG_DESC),
     batch_size: int = Form(0, description=_BATCH_DESC),
-    topic: str = Form("", description="輸出檔名 output/{日期}/{topic}.txt；留空用上傳檔名"),
+    topic: str = Form("", description="transcript 的 topic 欄位；留空用上傳檔名"),
     container: Container = Depends(get_container),
 ) -> JobCreated:
     """上傳音檔加入轉檔佇列。立即回傳 `job_id`，請輪詢 `GET /job/{job_id}` 取得結果。"""
@@ -161,7 +158,7 @@ def transcribe_url(
     url: str = Form(..., description="YouTube 或其他影音 / podcast 單集網址，由 yt-dlp 抽取音訊"),
     language: str = Form("", description=_LANG_DESC),
     batch_size: int = Form(0, description=_BATCH_DESC),
-    topic: str = Form("", description="輸出檔名 output/{日期}/{topic}.txt；留空用影片標題"),
+    topic: str = Form("", description="transcript 的 topic 欄位；留空用影片標題"),
     container: Container = Depends(get_container),
 ) -> JobCreated:
     """貼一個影音網址加入轉檔佇列。立即回傳 `job_id`，請輪詢 `GET /job/{job_id}` 取得結果。"""

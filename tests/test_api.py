@@ -4,13 +4,21 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
+from app.infrastructure.repository import InMemoryJobRepository
+from app.infrastructure.transcript_repository import InMemoryTranscriptRepository
 from app.main import create_app
 from tests.conftest import FakeTranscriber
 
 
 @pytest.fixture
 def client(settings, fake_transcriber):
-    app = create_app(settings, transcriber=fake_transcriber, run_worker=False)
+    app = create_app(
+        settings,
+        transcriber=fake_transcriber,
+        job_repository=InMemoryJobRepository(),
+        transcript_repository=InMemoryTranscriptRepository(),
+        run_worker=False,
+    )
     with TestClient(app) as c:
         yield c
 
@@ -60,8 +68,14 @@ def test_transcribe_file_queues_job(client):
 
 
 def test_end_to_end_file_transcription(settings):
-    """跑滿整條路徑：上傳 → 佇列 → worker → 完成，逐字稿可取回。"""
-    app = create_app(settings, transcriber=FakeTranscriber(), run_worker=True)
+    """跑滿整條路徑:上傳 → 佇列 → worker → 完成,逐字稿可取回。"""
+    app = create_app(
+        settings,
+        transcriber=FakeTranscriber(),
+        job_repository=InMemoryJobRepository(),
+        transcript_repository=InMemoryTranscriptRepository(),
+        run_worker=True,
+    )
     with TestClient(app) as client:
         job_id = client.post(
             "/transcribe",
@@ -78,4 +92,4 @@ def test_end_to_end_file_transcription(settings):
         result = client.get(f"/job/{job_id}").json()
         assert result["status"] == "done"
         assert result["text"] == "你好\n世界"
-        assert result["txt_file"].endswith("端到端.txt")
+        assert result["transcript_id"] is not None

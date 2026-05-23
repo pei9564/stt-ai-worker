@@ -5,5 +5,7 @@ uvicorn[standard]==0.32.1
 python-multipart==0.0.17
 yt-dlp
 feedparser==6.0.11
+psycopg[binary]==3.2.3
+psycopg_pool==3.2.4
 nvidia-cublas-cu12==12.4.5.8
 nvidia-cudnn-cu12==9.1.0.70

@@ -370,7 +370,7 @@ function pollJob(jobId) {
         statusEl.textContent = `job ${jobId} 轉檔中…`;
       } else if (d.status === 'done') {
         clearInterval(pollTimers[jobId]);
-        statusEl.textContent = `job ${jobId} 完成 | 語言 ${d.language} | 長度 ${d.duration.toFixed(1)}s | 已存 ${d.txt_file}`;
+        statusEl.textContent = `job ${jobId} 完成 | 語言 ${d.language} | 長度 ${d.duration.toFixed(1)}s | transcript #${d.transcript_id}`;
         resultEl.value = d.text;
       } else if (d.status === 'error') {
         clearInterval(pollTimers[jobId]);
@@ -447,10 +447,7 @@ async function renderJobs() {
       const row = document.createElement('div');
       row.className = 'jobrow' + (j.status === 'done' ? ' clickable' : '');
 
-      const rawTitle = j.topic
-        || (j.txt_file && j.txt_file.split('/').pop())
-        || j.id;
-      const title = rawTitle.replace(/\.[a-zA-Z0-9]+$/, '');
+      const title = j.topic || j.id;
       const when = (j.finished_at || j.created_at || '').replace('T', ' ');
 
       const badge = document.createElement('span');
@@ -537,7 +534,7 @@ async function viewJobResult(jobId) {
   try {
     const d = await (await fetch('/job/' + jobId)).json();
     if (d.status !== 'done') { statusEl.textContent = `job ${jobId} 狀態: ${d.status}`; return; }
-    statusEl.textContent = `job ${jobId} | 語言 ${d.language} | 長度 ${d.duration.toFixed(1)}s | 已存 ${d.txt_file}`;
+    statusEl.textContent = `job ${jobId} | 語言 ${d.language} | 長度 ${d.duration.toFixed(1)}s | transcript #${d.transcript_id}`;
     resultEl.value = d.text;
   } catch (e) {
     statusEl.textContent = '載入失敗: ' + e.message;
