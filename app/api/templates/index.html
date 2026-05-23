@@ -287,7 +287,7 @@
 </head>
 <body>
 <h1>語音轉文字</h1>
-<p class="meta">模型: __MODEL__ &nbsp;·&nbsp; 裝置: __DEVICE__ &nbsp;·&nbsp; 預設批次: __BATCH__</p>
+<p class="meta">faster-whisper __MODEL__ &nbsp;·&nbsp; __DEVICE__ &nbsp;·&nbsp; batch __BATCH__</p>
 <div id="gpu" class="gpubar">GPU: 載入中…</div>
 
 <div class="tabs">
@@ -305,7 +305,7 @@
     <select id="batch-url">__BATCHOPTS__</select>
     <label>標題 <span class="hint">選填,留空用影片標題</span></label>
     <input type="text" id="topic-url" placeholder="(選填)">
-    <button class="btn btn-primary" onclick="doTranscribeUrl()">加入佇列</button>
+    <button class="btn btn-primary" onclick="doTranscribeUrl()">開始轉檔</button>
   </div>
 
   <div class="panel" id="panel-feed">
@@ -317,14 +317,14 @@
     <select id="lang-feed">__LANGOPTS__</select>
     <label>批次大小 <span class="hint">整季跑建議 1~4,較不燒機</span></label>
     <select id="batch-feed">__BATCHOPTS__</select>
-    <p class="hint" style="margin:18px 0 0;">每集會建立獨立的 job,可在「任務」分頁追蹤。</p>
-    <button class="btn btn-primary" onclick="startFeed()">加入佇列</button>
+    <p class="hint" style="margin:18px 0 0;">每集會建立獨立的任務,可在「任務」分頁追蹤。</p>
+    <button class="btn btn-primary" onclick="startFeed()">開始整季轉檔</button>
     <div id="feedStatus"></div>
   </div>
 
   <div class="panel" id="panel-jobs">
-    <p class="hint" style="margin:0 0 12px;">過去 48 小時的所有 job,每 5 秒更新;點任一已完成項目可載入逐字稿。</p>
-    <button class="btn btn-danger" onclick="cancelAll()">取消所有排隊中的 job</button>
+    <p class="hint" style="margin:0 0 12px;">過去 48 小時的所有任務,每 5 秒更新;點任一已完成項目可載入逐字稿。</p>
+    <button class="btn btn-danger" onclick="cancelAll()">取消所有排隊中的任務</button>
     <div id="cancelMsg"></div>
     <div id="jobsList">載入中…</div>
   </div>
@@ -334,7 +334,7 @@
       <span class="result-label">逐字稿</span>
       <span id="status"></span>
     </div>
-    <textarea id="result" placeholder="完成後的逐字稿會顯示在這裡;原始紀錄存於 Postgres transcripts 表。"></textarea>
+    <textarea id="result" placeholder="完成後的逐字稿會顯示在這裡。"></textarea>
   </div>
 
 <script>
@@ -410,7 +410,7 @@ async function startFeed() {
     const data = await r.json();
     if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
     if (data.count === 0) {
-      fs.textContent = 'RSS 解析成功,但找不到音檔 (enclosure 格式可能不符)';
+      fs.textContent = 'RSS 解析成功,但裡面沒有音檔集數';
     } else {
       fs.textContent = `已排入 ${data.count} 集,到「任務」分頁追蹤進度`;
     }
@@ -446,12 +446,12 @@ async function renderJobs() {
   const box = document.getElementById('jobsList');
   try {
     const d = await (await fetch('/jobs')).json();
-    if (!d.jobs.length) { box.textContent = '（48 小時內沒有 job）'; return; }
+    if (!d.jobs.length) { box.textContent = '(48 小時內沒有任務)'; return; }
     box.innerHTML = '';
 
     const header = document.createElement('div');
     header.className = 'jobs-header';
-    header.textContent = `佇列中 ${d.queue_size} 個待處理 · 共 ${d.jobs.length} 筆`;
+    header.textContent = `排隊中 ${d.queue_size} 個 · 共 ${d.jobs.length} 筆`;
     box.appendChild(header);
 
     d.jobs.forEach(j => {
