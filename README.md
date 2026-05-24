@@ -6,12 +6,14 @@
 
 ## 執行
 
+本服務已正式遷移至 K3s 叢集作為主要運行環境（部署細節請參考 `ai-finance-infra` repo）。若需在本地單獨使用 Docker Compose 開發測試：
+
 ```bash
 docker compose up -d --build
 ```
 
 開 <http://localhost:8000> 操作，API 文件在 <http://localhost:8000/docs>。
-設定改 `.env` (模型 / 裝置 / 批次大小 / 語言 / `DB_URL`)；改完 `docker compose up -d`。
+設定改 `.env` (模型 / 裝置 / 批次大小 / 語言 / `DB_URL`)；改完重啟即可。
 逐字稿與 job 狀態都存進 Postgres (`transcripts` / `jobs` 兩張表)；服務啟動時自動套用 `app/infrastructure/schema.sql`。
 
 ## 架構
