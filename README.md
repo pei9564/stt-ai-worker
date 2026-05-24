@@ -1,7 +1,8 @@
-# STT Service
+# STT AI Worker
 
-語音轉文字服務。貼 YouTube 連結 / 訂閱 Podcast RSS，由 faster-whisper
-轉成逐字稿。所有請求排進單一佇列，由一個 worker 依序處理 (序列化 GPU 存取)。
+語音轉文字 (Speech-to-Text) 推論服務。支援貼上 YouTube 連結或訂閱 Podcast RSS，自動下載並交由 `faster-whisper` 模型轉換成逐字稿。
+
+本服務內建佇列機制：所有轉錄請求將排進單一佇列，由單個後台 Worker 依序處理，藉此確保 GPU VRAM 的獨佔與存取安全。本專案為 `ai-finance-infra` 生態系的一環。
 
 ## 執行
 
