@@ -105,3 +105,19 @@ STT 工作提供 `stage`、`progress`、`error_code`、`retry_hint`，PG 的 det
 scraper 保存遠端 STT job ID，重啟後查詢會繼續等候既有工作；不會因查詢而自動重試失敗工作。
 使用者再次按送 STT 才重試原失敗工作；不存在的工作才重新提交。
 翻譯／摘要沿用批次逐筆進度，API status 另附階段名稱與重試提示。
+
+## 監控與通知
+
+兩個服務提供 Prometheus 相容的 `/metrics`，包含 HTTP 次數／耗時、背景操作成功／失敗與耗時。
+STT 另含 queued jobs、worker_up、uploads 可用磁碟；scraper 含 pipeline／STT 提交數。
+labels 使用路由模板，不含 job ID／來源網址／逐字稿，避免無限 cardinality。
+每個 HTTP 回應有 `X-Request-ID`，可傳入合法 ID；scraper 會轉送它到 STT／LLM，
+STT 保存原提交 request ID，worker logs 用 job_id 連結處理時間。
+STT `/diagnostics`、scraper `/api/diagnostics` 提供狀態與磁碟資訊。
+
+可選 `ALERT_WEBHOOK_URL` 接受 JSON `{service, code, job_id}`，預設空白不發通知。
+工作失敗／逾時、HTTP 5xx、DB 不可用與低磁碟空間會告警，同類通知 5 分鐘合併，
+有限背景佇列與 5 秒 HTTP timeout 避免影響工作；投遞失敗不自動重試。
+不傳送全文、URL、credentials 或 webhook 位址。服務每 60 秒檢查 DB／磁碟。
+K3s Service 已加 scrape annotations；要保存歷史圖表仍需自行接 Prometheus 等收集器。
+進程完全停止時無法自行通知，需外部監控／K3s 告警補足。

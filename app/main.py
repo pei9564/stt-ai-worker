@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import logging
+import asyncio
+import os
 import pathlib
 from contextlib import asynccontextmanager
 
@@ -22,6 +24,7 @@ from app.domain.ports import JobRepository, Transcriber, TranscriptRepository
 from app.infrastructure.pg_job_repository import PostgresJobRepository
 from app.infrastructure.transcript_repository import PostgresTranscriptRepository
 from app.logging_config import configure_logging
+from app.observability import Observability
 from app.services.job_service import JobService, QueueFullError
 from app.services.transcription import TranscriptionService
 from app.services.worker import TranscriptionWorker
@@ -63,6 +66,7 @@ def create_app(
     run_worker            : 是否在 lifespan 啟動背景 worker thread。
     """
     configure_logging()
+    observer = Observability('stt')
     settings = settings or load_settings()
 
     # 只在「兩個 repo 都沒被注入」時才開 PG pool;測試路徑完全不碰 PG。
@@ -101,7 +105,7 @@ def create_app(
         max_audio_seconds=settings.max_audio_seconds,
         max_job_seconds=settings.max_job_seconds,
     )
-    worker = TranscriptionWorker(job_service, transcription_service, max_job_seconds=settings.max_job_seconds)
+    worker = TranscriptionWorker(job_service, transcription_service, max_job_seconds=settings.max_job_seconds, observer=observer)
 
     container = Container(
         settings=settings,
@@ -118,10 +122,29 @@ def create_app(
             pool.open()
             _apply_schema(pool)
             log.info("PG schema applied")
+        observer.start()
         job_service.recover_interrupted()
         if run_worker:
             worker.start()
+        async def monitor():
+            while True:
+                await asyncio.sleep(60)
+                observer.disk(os.getenv('UPLOAD_DIR', '/data/uploads'))
+                observer.disk('/tmp')
+                if run_worker and not worker.is_alive:
+                    observer.alert('worker_unavailable')
+                try:
+                    await asyncio.to_thread(job_service.get, '__monitor__')
+                except Exception:
+                    observer.alert('database_unavailable')
+        monitor_task = asyncio.create_task(monitor())
         yield
+        monitor_task.cancel()
+        try:
+            await monitor_task
+        except asyncio.CancelledError:
+            pass
+        observer.stop()
         if run_worker:
             worker.stop()
         if pool is not None and not worker.is_alive:
@@ -154,6 +177,26 @@ def create_app(
 
     from app.infrastructure.limits import BodyLimitMiddleware
     app.add_middleware(BodyLimitMiddleware, max_bytes=settings.max_upload_bytes + 1024 * 1024)
+    app.state.observer = observer
+    observer.attach(app)
+    from fastapi.responses import Response
+    @app.get('/metrics')
+    def metrics():
+        disk = observer.disk(os.getenv('UPLOAD_DIR', '/data/uploads'))
+        return Response(observer.render({'queued_jobs': job_service.queue_size,
+                                         'worker_up': worker.is_alive,
+                                         'uploads_disk_free_bytes': disk['free_bytes']}),
+                        media_type='text/plain; version=0.0.4')
+
+    @app.get('/diagnostics')
+    def diagnostics():
+        healthy = worker.is_alive
+        if not healthy:
+            observer.alert('worker_unavailable')
+        return {'worker_up': healthy, 'queued_jobs': job_service.queue_size,
+                'uploads_disk': observer.disk(os.getenv('UPLOAD_DIR', '/data/uploads')),
+                'temporary_disk': observer.disk('/tmp'), 'notifications_enabled': bool(observer.webhook)}
+
     app.state.container = container
     app.include_router(router)
     return app

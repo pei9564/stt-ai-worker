@@ -13,6 +13,7 @@ import threading
 import uuid
 
 from app.domain.audio_source import AudioSource
+from app.observability import request_id_var
 from app.domain.job import Job, JobResult, JobStatus, JobType
 from app.domain.ports import JobRepository
 
@@ -51,6 +52,7 @@ class JobService:
             language=language or None,
             batch_size=batch_size,
             source=source,
+            details={"request_id": request_id_var.get()},
         )
         with self._lock:
             self._require_capacity()
@@ -61,7 +63,7 @@ class JobService:
     def create_many(self, specs: list[dict]) -> list[Job]:
         with self._lock:
             self._require_capacity(len(specs))
-            jobs = [Job(id=uuid.uuid4().hex[:12], **spec) for spec in specs]
+            jobs = [Job(id=uuid.uuid4().hex[:12], details={"request_id": request_id_var.get()}, **spec) for spec in specs]
             self._repo.save_many(jobs)
             for job in jobs:
                 self._queue.put(job.id)
