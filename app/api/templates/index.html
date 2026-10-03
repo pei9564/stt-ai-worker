@@ -1,635 +1,1414 @@
 <!doctype html>
 <html lang="zh-Hant">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>語音轉文字</title>
-<style>
-  :root {
-    --bg: #f5f0e8;
-    --surface: #ffffff;
-    --border: #e4ddd4;
-    --border-light: #ede9e3;
-    --text: #2c2825;
-    --text-muted: #9a9490;
-    --text-secondary: #6b6560;
-    --accent: #5b7fa6;
-    --accent-hover: #4a6e93;
-
-    --badge-queued-bg: #ede9e3;
-    --badge-queued-fg: #7a7570;
-    --badge-running-bg: #deeaf7;
-    --badge-running-fg: #2f5f8a;
-    --badge-done-bg: #d8edd8;
-    --badge-done-fg: #2d6b2d;
-    --badge-error-bg: #fce8e8;
-    --badge-error-fg: #993030;
-
-    --danger: #993030;
-    --danger-bg: #fce8e8;
-  }
-
-  *, *::before, *::after { box-sizing: border-box; }
-
-  body {
-    font-family: system-ui, -apple-system, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    max-width: 780px;
-    margin: 48px auto;
-    padding: 0 20px;
-    font-size: 0.95rem;
-    line-height: 1.5;
-  }
-
-  h1 {
-    font-size: 1.25rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    margin: 0 0 4px;
-  }
-
-  .meta {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    margin: 0 0 16px;
-  }
-
-  /* GPU bar */
-  .gpubar {
-    font-size: 0.8rem;
-    padding: 7px 12px;
-    border-radius: 6px;
-    margin-bottom: 18px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    font-family: ui-monospace, monospace;
-    color: var(--text-secondary);
-  }
-  .gpubar.warm { background: #fff8ec; border-color: #f0d9a0; color: #7a5c00; }
-  .gpubar.hot  { background: var(--badge-error-bg); border-color: #f0b0b0; color: var(--danger); }
-
-  /* Tabs */
-  .tabs {
-    display: flex;
-    gap: 0;
-    border-bottom: 2px solid var(--border);
-    margin-bottom: 24px;
-  }
-  .tab {
-    padding: 8px 18px;
-    cursor: pointer;
-    color: var(--text-muted);
-    font-size: 0.9rem;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -2px;
-    transition: color 0.15s, border-color 0.15s;
-    user-select: none;
-  }
-  .tab:hover { color: var(--text); }
-  .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
-
-  .panel { display: none; }
-  .panel.active { display: block; }
-
-  /* Form elements */
-  label {
-    display: block;
-    margin: 16px 0 5px;
-    font-weight: 600;
-    font-size: 0.88rem;
-    color: var(--text);
-  }
-  .hint { font-size: 0.78rem; color: var(--text-muted); font-weight: normal; }
-
-  input[type=text], input[type=file], select {
-    width: 100%;
-    padding: 8px 10px;
-    font-size: 0.9rem;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface);
-    color: var(--text);
-    outline: none;
-    transition: border-color 0.15s;
-  }
-  input[type=text]:focus, select:focus { border-color: var(--accent); }
-  input[type=file] { padding: 6px 8px; color: var(--text-secondary); }
-  select { width: auto; min-width: 120px; }
-
-  input[type=text][style*="width:80px"] { width: 80px; }
-
-  /* Buttons */
-  .btn {
-    display: inline-block;
-    margin-top: 20px;
-    padding: 8px 20px;
-    font-size: 0.9rem;
-    font-weight: 600;
-    border-radius: 6px;
-    cursor: pointer;
-    border: 1px solid transparent;
-    transition: background 0.15s, color 0.15s;
-  }
-  .btn-primary {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
-  }
-  .btn-primary:hover { background: var(--accent-hover); }
-  .btn-primary:disabled { opacity: 0.45; cursor: default; }
-
-  .btn-danger {
-    background: var(--danger-bg);
-    color: var(--danger);
-    border-color: #f0b0b0;
-    font-size: 0.82rem;
-    padding: 5px 12px;
-    margin-top: 0;
-    margin-bottom: 14px;
-  }
-  .btn-danger:hover { background: #f9d0d0; }
-
-  button:disabled { opacity: 0.45; cursor: default; }
-
-  /* Inline action buttons for job rows */
-  .btn-sm {
-    padding: 2px 9px;
-    font-size: 0.75rem;
-    border-radius: 4px;
-    cursor: pointer;
-    border: 1px solid var(--border);
-    background: var(--surface);
-    color: var(--text-secondary);
-    margin-left: 6px;
-    transition: background 0.12s;
-  }
-  .btn-sm:hover { background: var(--border-light); }
-  .btn-sm.danger { color: var(--danger); border-color: #f0b0b0; }
-  .btn-sm.danger:hover { background: var(--badge-error-bg); }
-
-  /* Status & result */
-  #feedStatus {
-    margin-top: 16px;
-    font-size: 0.85rem;
-    color: var(--text-secondary);
-    white-space: pre-wrap;
-  }
-
-  /* 逐字稿輸出區:跟上方分頁拉開距離,並有自己的小標題列 */
-  .result-section {
-    margin-top: 32px;
-    padding-top: 20px;
-    border-top: 1px solid var(--border-light);
-  }
-  .result-header {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 8px;
-    min-height: 1.4em;
-  }
-  .result-label {
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--text);
-    letter-spacing: 0.02em;
-  }
-  #status {
-    font-size: 0.82rem;
-    color: var(--text-secondary);
-    white-space: pre-wrap;
-    text-align: right;
-  }
-
-  textarea {
-    width: 100%;
-    height: 280px;
-    font-family: ui-monospace, monospace;
-    font-size: 0.82rem;
-    padding: 10px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--surface);
-    color: var(--text);
-    resize: vertical;
-    outline: none;
-  }
-  textarea:focus { border-color: var(--accent); }
-  textarea::placeholder { color: var(--text-muted); }
-
-  /* Jobs panel */
-  .jobs-header {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    padding-bottom: 10px;
-    border-bottom: 1px solid var(--border-light);
-    margin-bottom: 4px;
-  }
-
-  .jobrow {
-    display: flex;
-    align-items: center;
-    padding: 9px 4px;
-    border-bottom: 1px solid var(--border-light);
-    gap: 10px;
-    font-size: 0.88rem;
-  }
-  .jobrow.clickable { cursor: pointer; }
-  .jobrow.clickable:hover { background: #faf8f5; border-radius: 4px; }
-
-  .job-title {
-    flex: 1;
-    font-weight: 500;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .job-meta {
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    white-space: nowrap;
-  }
-  .job-actions {
-    display: flex;
-    gap: 0;
-    flex-shrink: 0;
-  }
-  .job-error {
-    font-size: 0.78rem;
-    color: var(--danger);
-    padding: 2px 4px 0;
-    grid-column: 1 / -1;
-  }
-
-  /* Badges */
-  .badge {
-    display: inline-flex;
-    align-items: center;
-    padding: 2px 9px;
-    border-radius: 20px;
-    font-size: 0.72rem;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    white-space: nowrap;
-    flex-shrink: 0;
-    min-width: 58px;
-    justify-content: center;
-  }
-  .badge.queued  { background: var(--badge-queued-bg);  color: var(--badge-queued-fg); }
-  .badge.running { background: var(--badge-running-bg); color: var(--badge-running-fg); }
-  .badge.done    { background: var(--badge-done-bg);    color: var(--badge-done-fg); }
-  .badge.error   { background: var(--badge-error-bg);   color: var(--badge-error-fg); }
-
-  #cancelMsg { font-size: 0.82rem; color: var(--text-muted); margin-bottom: 6px; }
-</style>
-</head>
-<body>
-<h1>語音轉文字</h1>
-<p class="meta">faster-whisper __MODEL__ &nbsp;·&nbsp; __DEVICE__ &nbsp;·&nbsp; batch __BATCH__</p>
-<div id="gpu" class="gpubar">GPU: 載入中…</div>
-
-<div class="tabs">
-  <div class="tab active" data-tab="url">YouTube / 連結</div>
-  <div class="tab" data-tab="file">上傳檔案</div>
-  <div class="tab" data-tab="feed">RSS 整季</div>
-  <div class="tab" data-tab="jobs">任務</div>
-</div>
-
-  <div class="panel active" id="panel-url">
-    <label>YouTube / Podcast 單集網址</label>
-    <input type="text" id="url" placeholder="https://www.youtube.com/watch?v=…">
-    <label>語言</label>
-    <select id="lang-url">__LANGOPTS__</select>
-    <label>批次大小 <span class="hint">越大越快、GPU 越熱</span></label>
-    <select id="batch-url">__BATCHOPTS__</select>
-    <label>標題 <span class="hint">選填,留空用影片標題</span></label>
-    <input type="text" id="topic-url" placeholder="(選填)">
-    <button class="btn btn-primary" onclick="doTranscribeUrl()">開始轉檔</button>
-  </div>
-
-  <div class="panel" id="panel-file">
-    <label>選擇音訊檔案 <span class="hint">支援 m4a, mp3, wav, aac, ogg, flac, mp4</span></label>
-    <input type="file" id="file" accept=".m4a,.mp3,.wav,.aac,.ogg,.flac,.mp4">
-    <label>語言</label>
-    <select id="lang-file">__LANGOPTS__</select>
-    <label>批次大小 <span class="hint">越大越快、GPU 越熱</span></label>
-    <select id="batch-file">__BATCHOPTS__</select>
-    <label>標題 <span class="hint">選填,留空用檔案名稱</span></label>
-    <input type="text" id="topic-file" placeholder="(選填)">
-    <button class="btn btn-primary" onclick="doTranscribeFile()">開始上傳並轉檔</button>
-  </div>
-
-  <div class="panel" id="panel-feed">
-    <label>RSS Feed 網址</label>
-    <input type="text" id="feed" placeholder="https://…/feed.xml">
-    <label>集數 <span class="hint">0 = 整季全抓 (從新到舊)</span></label>
-    <input type="text" id="feedLimit" value="3" style="width:80px">
-    <label>語言</label>
-    <select id="lang-feed">__LANGOPTS__</select>
-    <label>批次大小 <span class="hint">整季跑建議 1~4,較不燒機</span></label>
-    <select id="batch-feed">__BATCHOPTS__</select>
-    <p class="hint" style="margin:18px 0 0;">每集會建立獨立的任務,可在「任務」分頁追蹤。</p>
-    <button class="btn btn-primary" onclick="startFeed()">開始整季轉檔</button>
-    <div id="feedStatus"></div>
-  </div>
-
-  <div class="panel" id="panel-jobs">
-    <p class="hint" style="margin:0 0 12px;">過去 48 小時的所有任務,每 5 秒更新;點任一已完成項目可載入逐字稿。</p>
-    <button class="btn btn-danger" onclick="cancelAll()">取消所有排隊中的任務</button>
-    <div id="cancelMsg"></div>
-    <div id="jobsList">載入中…</div>
-  </div>
-
-  <div class="result-section">
-    <div class="result-header">
-      <span class="result-label">逐字稿</span>
-      <span id="status"></span>
-    </div>
-    <textarea id="result" placeholder="完成後的逐字稿會顯示在這裡。"></textarea>
-  </div>
-
-<script>
-document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
-  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
-  t.classList.add('active');
-  document.getElementById('panel-' + t.dataset.tab).classList.add('active');
-  if (t.dataset.tab === 'jobs') startJobsPanel(); else stopJobsPanel();
-});
-
-const statusEl = document.getElementById('status');
-const resultEl = document.getElementById('result');
-const pollTimers = {};
-
-async function doTranscribeUrl() {
-  const u = document.getElementById('url').value.trim();
-  if (!u) { statusEl.textContent = '請輸入網址'; return; }
-  const fd = new FormData();
-  fd.append('url', u);
-  fd.append('language', document.getElementById('lang-url').value);
-  fd.append('batch_size', document.getElementById('batch-url').value);
-  fd.append('topic', document.getElementById('topic-url').value.trim());
-  resultEl.value = '';
-  statusEl.textContent = '送出中…';
-  try {
-    const r = await fetch('/transcribe_url', { method: 'POST', body: fd });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || '送出失敗');
-    pollJob(data.job_id);
-  } catch (e) {
-    statusEl.textContent = '錯誤: ' + e.message;
-  }
-}
-
-async function doTranscribeFile() {
-  const fileInput = document.getElementById('file');
-  if (!fileInput.files.length) { statusEl.textContent = '請選擇檔案'; return; }
-  const file = fileInput.files[0];
-  const fd = new FormData();
-  fd.append('file', file);
-  fd.append('language', document.getElementById('lang-file').value);
-  fd.append('batch_size', document.getElementById('batch-file').value);
-  fd.append('topic', document.getElementById('topic-file').value.trim());
-  resultEl.value = '';
-  statusEl.textContent = '上傳中…';
-  try {
-    const r = await fetch('/transcribe_file', { method: 'POST', body: fd });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || '上傳失敗');
-    pollJob(data.job_id);
-  } catch (e) {
-    statusEl.textContent = '錯誤: ' + e.message;
-  }
-}
-
-function pollJob(jobId) {
-  if (pollTimers[jobId]) clearInterval(pollTimers[jobId]);
-  const tick = async () => {
-    try {
-      const d = await (await fetch('/job/' + jobId)).json();
-      if (d.status === 'queued') {
-        statusEl.textContent = '排隊中…';
-      } else if (d.status === 'running') {
-        statusEl.textContent = jobStage(d);
-      } else if (d.status === 'done') {
-        clearInterval(pollTimers[jobId]);
-        statusEl.textContent = `完成 · ${d.language} · ${d.duration.toFixed(1)}s`;
-        resultEl.value = d.text;
-      } else if (d.status === 'error') {
-        clearInterval(pollTimers[jobId]);
-        statusEl.textContent = '失敗: ' + d.error + ' · ' + (d.retry_hint || '');
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>語音轉文字 · Voice Notes</title>
+    <style>
+      :root {
+        --bg: #f4f7f5;
+        --surface: #fff;
+        --ink: #20382d;
+        --muted: #61756b;
+        --line: #dce6df;
+        --accent: #22694f;
+        --soft: #eaf3ed;
+        --danger: #a03838;
       }
-    } catch (e) {
-      statusEl.textContent = '查詢失敗: ' + e.message;
-    }
-  };
-  pollTimers[jobId] = setInterval(tick, 3000);
-  tick();
-}
-
-async function startFeed() {
-  const feed = document.getElementById('feed').value.trim();
-  const fs = document.getElementById('feedStatus');
-  if (!feed) { fs.textContent = '請輸入 RSS 網址'; return; }
-  const fd = new FormData();
-  fd.append('feed_url', feed);
-  fd.append('limit', document.getElementById('feedLimit').value || '0');
-  fd.append('language', document.getElementById('lang-feed').value);
-  fd.append('batch_size', document.getElementById('batch-feed').value);
-  fs.textContent = '解析 RSS 中…';
-  try {
-    const r = await fetch('/transcribe_feed', { method: 'POST', body: fd });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
-    if (data.count === 0) {
-      fs.textContent = 'RSS 解析成功,但裡面沒有音檔集數';
-    } else {
-      fs.textContent = `已排入 ${data.count} 集,到「任務」分頁追蹤進度`;
-    }
-  } catch (e) {
-    fs.textContent = '錯誤: ' + e.message;
-  }
-}
-
-async function cancelAll() {
-  const msg = document.getElementById('cancelMsg');
-  msg.textContent = '取消中…';
-  try {
-    const r = await fetch('/jobs/cancel-all', { method: 'POST' });
-    const d = await r.json();
-    msg.textContent = d.message;
-    renderJobs();
-  } catch (e) {
-    msg.textContent = '取消失敗: ' + e.message;
-  }
-}
-
-let jobsTimer = null;
-function startJobsPanel() {
-  if (jobsTimer) clearInterval(jobsTimer);
-  jobsTimer = setInterval(renderJobs, 5000);
-  renderJobs();
-}
-function stopJobsPanel() {
-  if (jobsTimer) { clearInterval(jobsTimer); jobsTimer = null; }
-}
-
-function jobStage(job) {
-  const names = {queued:'排隊中',starting:'準備中',downloading:'下載中',validating:'音訊驗證中',transcribing:'轉錄中',saving:'儲存中',done:'完成'};
-  return (names[job.stage] || job.stage || job.status) + (job.progress == null ? '…' : ' ' + job.progress + '%');
-}
-
-async function renderJobs() {
-  const box = document.getElementById('jobsList');
-  try {
-    const d = await (await fetch('/jobs')).json();
-    if (!d.jobs.length) { box.textContent = '(48 小時內沒有任務)'; return; }
-    box.innerHTML = '';
-
-    const header = document.createElement('div');
-    header.className = 'jobs-header';
-    header.textContent = `排隊中 ${d.queue_size} 個 · 共 ${d.jobs.length} 筆`;
-    box.appendChild(header);
-
-    d.jobs.forEach(j => {
-      const row = document.createElement('div');
-      row.className = 'jobrow' + (j.status === 'done' ? ' clickable' : '');
-
-      const title = j.topic || j.id;
-      const when = (j.finished_at || j.created_at || '').replace('T', ' ');
-
-      const badge = document.createElement('span');
-      badge.className = 'badge ' + j.status;
-      badge.textContent = j.status === "running" ? jobStage(j) : j.status;
-
-      const titleEl = document.createElement('span');
-      titleEl.className = 'job-title';
-      titleEl.textContent = title;
-
-      const metaEl = document.createElement('span');
-      metaEl.className = 'job-meta';
-      metaEl.textContent = j.type + ' · ' + when;
-
-      const actions = document.createElement('span');
-      actions.className = 'job-actions';
-
-      if (j.status === 'done') {
-        row.onclick = () => viewJobResult(j.id);
-        for (const [format, label] of [['json','JSON'], ['markdown','Markdown'], ['srt','SRT']]) {
-          const link = document.createElement('a');
-          link.href = '/job/' + encodeURIComponent(j.id) + '/export?format=' + format;
-          link.textContent = label;
-          link.className = 'btn-sm';
-          link.onclick = e => e.stopPropagation();
-          actions.appendChild(link);
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          15px/1.65 system-ui,
+          -apple-system,
+          "Noto Sans TC",
+          sans-serif;
+      }
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+      button,
+      a,
+      input,
+      select,
+      textarea,
+      summary {
+        -webkit-tap-highlight-color: transparent;
+      }
+      button,
+      a {
+        touch-action: manipulation;
+      }
+      button {
+        cursor: pointer;
+      }
+      button:disabled {
+        opacity: 0.55;
+        cursor: wait;
+      }
+      a {
+        color: var(--accent);
+      }
+      :focus-visible {
+        outline: 3px solid #67a58b;
+        outline-offset: 3px;
+      }
+      button,
+      input,
+      select,
+      textarea {
+        border-radius: 10px;
+      }
+      button {
+        border: 1px solid var(--line);
+        background: white;
+        color: var(--ink);
+        padding: 9px 14px;
+        font-weight: 600;
+      }
+      button:hover:not(:disabled) {
+        background: var(--soft);
+      }
+      .primary {
+        background: var(--accent);
+        color: white;
+        border-color: var(--accent);
+      }
+      .primary:hover:not(:disabled) {
+        background: #18543e;
+      }
+      .skip {
+        position: absolute;
+        top: -80px;
+      }
+      .skip:focus {
+        top: 8px;
+        background: white;
+        padding: 12px;
+        z-index: 10;
+      }
+      .shell {
+        max-width: 1360px;
+        margin: auto;
+        padding: 0 40px;
+      }
+      .topbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 20px;
+        padding: 26px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .brand {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+      }
+      .brand-mark {
+        display: grid;
+        place-items: center;
+        background: var(--accent);
+        color: white;
+        width: 42px;
+        height: 42px;
+        border-radius: 13px;
+        font-size: 23px;
+      }
+      .brand strong {
+        display: block;
+        font-size: 18px;
+      }
+      .eyebrow {
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 2px;
+        color: var(--muted);
+      }
+      .top-note,
+      .hint,
+      .meta {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .hero {
+        padding: 30px 0 26px;
+      }
+      .hero h1 {
+        font-size: clamp(25px, 3vw, 34px);
+        letter-spacing: -1px;
+        margin: 0 0 8px;
+      }
+      .hero p {
+        margin: 0;
+        color: var(--muted);
+      }
+      .workspace {
+        display: grid;
+        grid-template-columns: minmax(340px, 430px) minmax(0, 1fr);
+        gap: 24px;
+        align-items: start;
+        padding-bottom: 32px;
+      }
+      .card {
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 26px;
+        box-shadow: 0 5px 22px #24442d04;
+        min-width: 0;
+      }
+      h2 {
+        font-size: 18px;
+        margin: 0 0 6px;
+      }
+      h3 {
+        font-size: 16px;
+        margin: 0;
+      }
+      p {
+        margin: 0 0 16px;
+      }
+      .tabs {
+        display: flex;
+        gap: 4px;
+        background: var(--bg);
+        border-radius: 12px;
+        padding: 4px;
+        margin: 22px 0;
+      }
+      .tab {
+        flex: 1;
+        border: 0;
+        background: transparent;
+        padding: 9px 5px;
+        font-size: 13px;
+        white-space: nowrap;
+        color: var(--muted);
+      }
+      .tab.active {
+        background: white;
+        color: var(--accent);
+        box-shadow: 0 2px 6px #20382d10;
+      }
+      .panel {
+        display: none;
+      }
+      .panel.active {
+        display: block;
+      }
+      label {
+        display: block;
+        font-size: 13px;
+        font-weight: 650;
+        margin: 18px 0 6px;
+      }
+      input[type="text"],
+      input[type="url"],
+      input[type="number"],
+      input[type="search"],
+      select {
+        width: 100%;
+        min-width: 0;
+        background: white;
+        border: 1px solid var(--line);
+        padding: 11px 12px;
+        color: var(--ink);
+      }
+      input::placeholder {
+        color: #7e8f86;
+      }
+      .form-pair {
+        display: grid;
+        grid-template-columns: 1fr 1.6fr;
+        gap: 12px;
+      }
+      details.advanced {
+        margin: 18px 0;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      summary {
+        cursor: pointer;
+      }
+      details label {
+        color: var(--ink);
+      }
+      .submit {
+        width: 100%;
+        margin-top: 22px;
+        padding: 12px;
+      }
+      .dropzone {
+        position: relative;
+        border: 1.5px dashed #a6c5b1;
+        border-radius: 14px;
+        background: #f6faf7;
+        padding: 25px 16px;
+        text-align: center;
+        cursor: pointer;
+      }
+      .dropzone.drag {
+        background: var(--soft);
+        border-color: var(--accent);
+      }
+      .dropzone input {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        width: 100%;
+        height: 100%;
+        cursor: pointer;
+      }
+      .dropzone:focus-within {
+        outline: 3px solid #67a58b;
+        outline-offset: 3px;
+      }
+      .drop-icon {
+        display: block;
+        font-size: 28px;
+        color: var(--accent);
+        margin-bottom: 8px;
+      }
+      .dropzone strong {
+        display: block;
+        font-size: 14px;
+      }
+      .dropzone .hint {
+        display: block;
+        margin-top: 5px;
+      }
+      .file-name {
+        font-size: 13px;
+        margin-top: 10px;
+        overflow-wrap: anywhere;
+        color: var(--accent);
+      }
+      .limits {
+        font-size: 12px;
+        color: var(--muted);
+        margin: 12px 0 0;
+      }
+      .feedback {
+        font-size: 13px;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .feedback:not(:empty) {
+        padding: 12px;
+        background: var(--soft);
+        border-radius: 10px;
+        margin-top: 14px;
+      }
+      .result-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 18px;
+      }
+      .pill {
+        font-size: 12px;
+        color: var(--accent);
+        background: var(--soft);
+        padding: 4px 10px;
+        border-radius: 20px;
+        white-space: nowrap;
+      }
+      .result-section {
+        min-height: 590px;
+        scroll-margin-top: 18px;
+      }
+      #resultTitle {
+        overflow-wrap: anywhere;
+      }
+      .progress-block {
+        padding: 14px 16px;
+        background: var(--bg);
+        border-radius: 12px;
+        margin: 18px 0;
+        font-size: 13px;
+      }
+      #status {
+        display: block;
+        overflow-wrap: anywhere;
+      }
+      progress {
+        width: 100%;
+        height: 7px;
+        accent-color: var(--accent);
+        display: block;
+        margin-top: 12px;
+      }
+      progress[hidden] {
+        display: none;
+      }
+      .result-empty {
+        display: grid;
+        place-content: center;
+        min-height: 310px;
+        text-align: center;
+        color: var(--muted);
+      }
+      .result-empty .symbol {
+        font-size: 36px;
+        color: #78a28a;
+        margin-bottom: 14px;
+      }
+      .result-empty strong {
+        color: var(--ink);
+        margin-bottom: 8px;
+      }
+      .result-empty p {
+        font-size: 13px;
+        max-width: 300px;
+      }
+      .toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin: 18px 0 12px;
+      }
+      .toolbar a {
+        display: inline-block;
+        padding: 8px 12px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        text-decoration: none;
+        font-size: 13px;
+      }
+      .toolbar button {
+        font-size: 13px;
+      }
+      textarea {
+        width: 100%;
+        min-height: 350px;
+        resize: vertical;
+        border: 1px solid var(--line);
+        padding: 18px;
+        font-size: 15px;
+        line-height: 1.9;
+        color: var(--ink);
+        background: #fcfdfb;
+      }
+      #resultMeta {
+        margin-top: 12px;
+      }
+      .job-tools {
+        display: flex;
+        gap: 8px;
+        margin: 16px 0;
+      }
+      .job-tools input {
+        flex: 1;
+      }
+      .job-tools select {
+        width: 108px;
+      }
+      .jobs-header {
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 12px;
+      }
+      .jobrow {
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 14px;
+        margin-bottom: 10px;
+        overflow-wrap: anywhere;
+      }
+      .jobrow.selected {
+        border-color: var(--accent);
+        background: #f8fbf9;
+      }
+      .job-heading {
+        display: flex;
+        align-items: start;
+        gap: 8px;
+        justify-content: space-between;
+      }
+      .job-title {
+        font-weight: 650;
+        font-size: 14px;
+        min-width: 0;
+        white-space: normal;
+        overflow-wrap: anywhere;
+      }
+      .job-title button {
+        text-align: left;
+        padding: 0;
+        background: none;
+        border: 0;
+        color: var(--accent);
+      }
+      .job-meta {
+        font-size: 11px;
+        color: var(--muted);
+        margin: 6px 0 10px;
+      }
+      .job-actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .btn-sm {
+        font-size: 12px;
+        padding: 5px 9px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        text-decoration: none;
+        background: white;
+      }
+      .danger {
+        color: var(--danger);
+      }
+      .job-error {
+        font-size: 12px;
+        color: var(--danger);
+        margin-top: 10px;
+        white-space: pre-wrap;
+      }
+      .badge {
+        font-size: 11px;
+        background: #eef1ef;
+        color: var(--muted);
+        border-radius: 20px;
+        padding: 3px 8px;
+        white-space: nowrap;
+      }
+      .badge.done {
+        background: var(--soft);
+        color: var(--accent);
+      }
+      .badge.running {
+        background: #edf3fd;
+        color: #355f97;
+      }
+      .badge.error {
+        background: #fceeee;
+        color: var(--danger);
+      }
+      .jobs-empty {
+        padding: 30px 10px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .service {
+        padding: 16px 0 30px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .service summary {
+        display: inline-block;
+      }
+      .service p {
+        margin: 10px 0 0;
+      }
+      .gpubar {
+        margin-top: 8px;
+      }
+      .gpubar.hot {
+        color: var(--danger);
+      }
+      [hidden] {
+        display: none !important;
+      }
+      .toast {
+        position: fixed;
+        bottom: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--ink);
+        color: white;
+        border-radius: 12px;
+        padding: 12px 20px;
+        max-width: 90vw;
+        z-index: 20;
+        font-size: 13px;
+      }
+      .toast:empty {
+        display: none;
+      }
+      @media (max-width: 900px) {
+        .shell {
+          padding: 0 20px;
         }
-      } else if (j.status === 'queued') {
-        const cancelBtn = document.createElement('button');
-        cancelBtn.textContent = '取消';
-        cancelBtn.className = 'btn-sm';
-        cancelBtn.onclick = async (e) => {
-          e.stopPropagation();
-          cancelBtn.disabled = true;
-          await fetch('/job/' + j.id + '/cancel', { method: 'POST' });
+        .workspace {
+          grid-template-columns: 1fr;
+        }
+        .result-section {
+          min-height: 440px;
+        }
+        .result-empty {
+          min-height: 240px;
+        }
+        .hero {
+          padding: 26px 0;
+        }
+        .top-note {
+          display: none;
+        }
+        .card {
+          padding: 22px;
+        }
+        .topbar {
+          padding: 20px 0;
+        }
+      }
+      @media (max-width: 380px) {
+        .shell {
+          padding: 0 12px;
+        }
+        .card {
+          padding: 18px 14px;
+        }
+        .form-pair {
+          grid-template-columns: 1fr;
+        }
+        .tab {
+          font-size: 12px;
+        }
+        .hero h1 {
+          font-size: 25px;
+        }
+        .job-tools {
+          flex-wrap: wrap;
+        }
+        .job-tools select {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <a class="skip" href="#workspace">跳到工作區</a>
+    <div class="shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">≋</span>
+          <div>
+            <strong>Voice Notes</strong>
+            <div class="eyebrow">YOUR WORDS, IN WRITING</div>
+          </div>
+        </div>
+        <span class="top-note">音訊、影片與 Podcast 的文字工作台</span>
+      </header>
+      <div class="hero">
+        <h1>把聲音，變成可以帶走的文字。</h1>
+        <p>貼上連結或上傳音檔，讓逐字稿替你留住每一個重點。</p>
+      </div>
+      <main id="workspace" class="workspace">
+        <section class="card" aria-labelledby="inputTitle">
+          <h2 id="inputTitle">建立轉錄</h2>
+          <p class="hint">選擇來源，剩下的交給轉錄服務。</p>
+          <div class="tabs" role="tablist" aria-label="轉錄來源與任務">
+            <button
+              id="tab-url"
+              class="tab active"
+              data-tab="url"
+              role="tab"
+              aria-controls="panel-url"
+              aria-selected="true"
+              tabindex="0"
+            >
+              貼上連結</button
+            ><button
+              id="tab-file"
+              class="tab"
+              data-tab="file"
+              role="tab"
+              aria-controls="panel-file"
+              aria-selected="false"
+              tabindex="-1"
+            >
+              上傳檔案</button
+            ><button
+              id="tab-feed"
+              class="tab"
+              data-tab="feed"
+              role="tab"
+              aria-controls="panel-feed"
+              aria-selected="false"
+              tabindex="-1"
+            >
+              Podcast RSS</button
+            ><button
+              id="tab-jobs"
+              class="tab"
+              data-tab="jobs"
+              role="tab"
+              aria-controls="panel-jobs"
+              aria-selected="false"
+              tabindex="-1"
+            >
+              任務
+            </button>
+          </div>
+          <form
+            class="panel active"
+            id="panel-url"
+            role="tabpanel"
+            aria-labelledby="tab-url"
+            novalidate
+          >
+            <label for="url">YouTube / Podcast 單集網址</label
+            ><input
+              type="url"
+              id="url"
+              placeholder="https://www.youtube.com/watch?v=…"
+              autocomplete="off"
+            />
+            <p class="limits">支援影片、Podcast 單集與直接音訊連結。</p>
+            <div class="form-pair">
+              <div>
+                <label for="lang-url">音訊語言</label
+                ><select id="lang-url">
+                  __LANGOPTS__
+                </select>
+              </div>
+              <div>
+                <label for="topic-url"
+                  >標題 <span class="hint">（選填）</span></label
+                ><input
+                  type="text"
+                  id="topic-url"
+                  placeholder="例如：本週訪談"
+                />
+              </div>
+            </div>
+            <details class="advanced">
+              <summary>進階設定</summary>
+              <label for="batch-url">處理批次大小</label
+              ><select id="batch-url">
+                __BATCHOPTS__
+              </select>
+              <p class="limits">保留預設即可；較小的批次可降低記憶體用量。</p>
+            </details>
+            <p class="limits">每段音訊最長 __MAXMINUTES__ 分鐘。</p>
+            <button class="primary submit" type="submit" id="submit-url">
+              開始轉成文字
+            </button>
+            <div class="feedback" id="message-url" role="status"></div>
+          </form>
+          <form
+            class="panel"
+            id="panel-file"
+            role="tabpanel"
+            aria-labelledby="tab-file"
+            novalidate
+          >
+            <div class="dropzone" id="dropzone">
+              <span class="drop-icon" aria-hidden="true">↥</span
+              ><strong>拖曳音檔到這裡，或點擊選擇</strong
+              ><span class="hint">MP3、M4A、WAV、AAC、OGG、FLAC、MP4</span
+              ><input
+                type="file"
+                id="file"
+                aria-label="選擇音訊檔案"
+                accept=".m4a,.mp3,.wav,.aac,.ogg,.flac,.mp4"
+              />
+            </div>
+            <div id="fileName" class="file-name" role="status"></div>
+            <div class="form-pair">
+              <div>
+                <label for="lang-file">音訊語言</label
+                ><select id="lang-file">
+                  __LANGOPTS__
+                </select>
+              </div>
+              <div>
+                <label for="topic-file"
+                  >標題 <span class="hint">（選填）</span></label
+                ><input
+                  type="text"
+                  id="topic-file"
+                  placeholder="例如：本週訪談"
+                />
+              </div>
+            </div>
+            <details class="advanced">
+              <summary>進階設定</summary>
+              <label for="batch-file">處理批次大小</label
+              ><select id="batch-file">
+                __BATCHOPTS__
+              </select>
+              <p class="limits">保留預設即可；較小的批次可降低記憶體用量。</p>
+            </details>
+            <p class="limits">
+              每段音訊最長 __MAXMINUTES__ 分鐘，單檔上限 __MAXMB__ MB。
+            </p>
+            <button class="primary submit" type="submit" id="submit-file">
+              上傳並轉成文字
+            </button>
+            <div class="feedback" id="message-file" role="status"></div>
+          </form>
+          <form
+            class="panel"
+            id="panel-feed"
+            role="tabpanel"
+            aria-labelledby="tab-feed"
+            novalidate
+          >
+            <label for="feed">Podcast RSS 網址</label
+            ><input
+              type="url"
+              id="feed"
+              placeholder="https://example.com/feed.xml"
+            /><label for="feedLimit">要轉錄幾集？</label
+            ><input
+              type="number"
+              id="feedLimit"
+              value="__DEFAULTFEED__"
+              min="1"
+              max="__MAXFEED__"
+            />
+            <p class="limits">
+              由新到舊，最多 __MAXFEED__ 集。每集各自建立任務。
+            </p>
+            <label for="lang-feed">音訊語言</label
+            ><select id="lang-feed">
+              __LANGOPTS__
+            </select>
+            <details class="advanced">
+              <summary>進階設定</summary>
+              <label for="batch-feed">處理批次大小</label
+              ><select id="batch-feed">
+                __BATCHOPTS__
+              </select>
+              <p class="limits">保留預設即可；較小的批次可降低記憶體用量。</p>
+            </details>
+            <p class="limits">每段音訊最長 __MAXMINUTES__ 分鐘。</p>
+            <button class="primary submit" type="submit" id="submit-feed">
+              建立 Podcast 轉錄
+            </button>
+            <div class="feedback" id="message-feed" role="status"></div>
+            <div id="feedStatus" class="feedback" role="status"></div>
+          </form>
+          <section
+            class="panel"
+            id="panel-jobs"
+            role="tabpanel"
+            aria-labelledby="tab-jobs"
+          >
+            <p class="hint">
+              近 __WINDOW__ 小時的任務，每 5
+              秒更新。處理中的任務可在重新整理後繼續查看。
+            </p>
+            <div class="job-tools">
+              <input
+                type="search"
+                id="jobSearch"
+                aria-label="搜尋任務"
+                placeholder="搜尋標題…"
+              /><select id="jobFilter" aria-label="任務狀態">
+                <option value="all">全部狀態</option>
+                <option value="active">處理中</option>
+                <option value="done">已完成</option>
+                <option value="error">未完成</option>
+              </select>
+            </div>
+            <div id="jobsList" aria-label="任務清單">載入中…</div>
+            <button id="refreshJobs" type="button">重新整理任務</button>
+            <details class="advanced">
+              <summary>管理排隊任務</summary>
+              <p class="hint">正在轉錄的任務會繼續執行。</p>
+              <button class="danger" onclick="cancelAll()">
+                取消所有排隊中的任務
+              </button>
+            </details>
+            <div id="cancelMsg" class="feedback" role="status"></div>
+          </section>
+        </section>
+        <section
+          class="card result-section"
+          id="resultSection"
+          aria-labelledby="resultTitle"
+        >
+          <div class="result-top">
+            <h2 id="resultTitle">你的逐字稿</h2>
+            <span class="pill" id="resultBadge">等待開始</span>
+          </div>
+          <p class="hint">在這裡閱讀、複製，或下載成你需要的格式。</p>
+          <div class="progress-block">
+            <span id="status" role="status" aria-live="polite"
+              >準備好音檔或連結，就可以開始。</span
+            ><progress
+              id="progress"
+              max="100"
+              aria-label="轉錄進度"
+              hidden
+            ></progress
+            ><button id="resumePoll" class="btn-sm" hidden>重新查詢進度</button>
+          </div>
+          <div class="result-empty" id="resultEmpty">
+            <span class="symbol" aria-hidden="true">≋</span
+            ><strong>讓每一句話，都有跡可循</strong>
+            <p>
+              完成後，逐字稿會出現在這裡。你也可以從「任務」開啟先前的結果。
+            </p>
+          </div>
+          <div id="resultContent" hidden>
+            <div class="toolbar">
+              <button id="copyResult">複製全文</button
+              ><button id="downloadText">下載 TXT</button
+              ><a id="exportSrt">SRT 字幕</a><a id="exportMarkdown">Markdown</a
+              ><a id="exportJson">JSON</a>
+            </div>
+            <textarea id="result" readonly aria-label="逐字稿內容"></textarea>
+            <p class="meta" id="resultMeta"></p>
+          </div>
+        </section>
+      </main>
+      <details class="service">
+        <summary>服務狀態與模型資訊</summary>
+        <p>faster-whisper __MODEL__ · __DEVICE__ · 預設批次 __BATCH__</p>
+        <div id="gpu" class="gpubar">讀取服務狀態中…</div>
+      </details>
+    </div>
+    <div class="toast" id="toast" role="status"></div>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const statusEl = $("status"),
+        resultEl = $("result");
+      let activeJob = null,
+        pollTimer = null,
+        pollVersion = 0,
+        jobsTimer = null,
+        jobs = [],
+        jobsLoading = false,
+        jobsSignature = "",
+        toastTimer;
+      const labels = {
+        queued: "排隊中",
+        running: "轉錄中",
+        done: "已完成",
+        error: "未完成",
+      };
+      function toast(message) {
+        $("toast").textContent = message;
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => ($("toast").textContent = ""), 4500);
+      }
+      function switchTab(key, focus = false) {
+        document.querySelectorAll(".tab").forEach((t) => {
+          const selected = t.dataset.tab === key;
+          t.classList.toggle("active", selected);
+          t.setAttribute("aria-selected", selected);
+          t.tabIndex = selected ? 0 : -1;
+          if (selected && focus) t.focus();
+        });
+        document
+          .querySelectorAll(".panel")
+          .forEach((p) =>
+            p.classList.toggle("active", p.id === "panel-" + key),
+          );
+        clearInterval(jobsTimer);
+        if (key === "jobs") {
           renderJobs();
-        };
-        actions.appendChild(cancelBtn);
-      } else if (j.status === 'error') {
-        const retryBtn = document.createElement('button');
-        retryBtn.textContent = '重試';
-        retryBtn.className = 'btn-sm';
-        retryBtn.onclick = async (e) => {
-          e.stopPropagation();
-          retryBtn.disabled = true;
-          try {
-            const r = await fetch('/job/' + j.id + '/retry', { method: 'POST' });
-            const data = await r.json();
-            if (!r.ok) throw new Error(data.detail || '重試失敗');
-            renderJobs();
-          } catch (error) {
-            alert(error.message);
-            retryBtn.disabled = false;
+          jobsTimer = setInterval(renderJobs, 5000);
+        }
+      }
+      const tabs = [...document.querySelectorAll(".tab")];
+      tabs.forEach((t, i) => {
+        t.onclick = () => switchTab(t.dataset.tab);
+        t.onkeydown = (e) => {
+          let n;
+          if (e.key === "ArrowRight") n = (i + 1) % tabs.length;
+          if (e.key === "ArrowLeft") n = (i + tabs.length - 1) % tabs.length;
+          if (e.key === "Home") n = 0;
+          if (e.key === "End") n = tabs.length - 1;
+          if (n != null) {
+            e.preventDefault();
+            switchTab(tabs[n].dataset.tab, true);
           }
         };
-        actions.appendChild(retryBtn);
-        const errEl = document.createElement('span');
-        errEl.className = 'job-error';
-        errEl.textContent = (j.error || '') + (j.retry_hint ? ' · ' + j.retry_hint : '');
-        row.appendChild(badge);
-        row.appendChild(titleEl);
-        row.appendChild(metaEl);
-        row.appendChild(actions);
-        row.appendChild(errEl);
-
-        if (j.status !== 'running') {
-          const delBtn = document.createElement('button');
-          delBtn.textContent = '刪除';
-          delBtn.className = 'btn-sm danger';
-          delBtn.onclick = async (e) => {
-            e.stopPropagation();
-            delBtn.disabled = true;
-            await fetch('/job/' + j.id, { method: 'DELETE' });
-            renderJobs();
-          };
-          actions.appendChild(delBtn);
+      });
+      async function api(path, options) {
+        const r = await fetch(path, options);
+        let d;
+        try {
+          d = await r.json();
+        } catch {
+          throw new Error("服務暫時無法回應，請稍後重試。");
         }
-
-        box.appendChild(row);
-        return;
+        if (!r.ok) {
+          const detail = d.detail;
+          throw new Error(
+            typeof detail === "string"
+              ? detail
+              : Array.isArray(detail)
+                ? detail.map((x) => x.msg).join("；")
+                : `請求失敗（${r.status}），請稍後重試。`,
+          );
+        }
+        return d;
       }
-
-      if (j.status !== 'running') {
-        const delBtn = document.createElement('button');
-        delBtn.textContent = '刪除';
-        delBtn.className = 'btn-sm danger';
-        delBtn.onclick = async (e) => {
-          e.stopPropagation();
-          delBtn.disabled = true;
-          await fetch('/job/' + j.id, { method: 'DELETE' });
-          renderJobs();
+      function validUrl(value) {
+        try {
+          return ["https:", "http:"].includes(new URL(value).protocol);
+        } catch {
+          return false;
+        }
+      }
+      function formError(key, message, field) {
+        $("message-" + key).textContent = message;
+        statusEl.textContent = message;
+        if (field) $(field).focus();
+      }
+      function fileDescription() {
+        const f = $("file").files[0];
+        $("fileName").textContent = f
+          ? `${f.name} · ${(f.size / 1024 / 1024).toFixed(1)} MB`
+          : "";
+      }
+      $("file").onchange = fileDescription;
+      const dropzone = $("dropzone");
+      ["dragenter", "dragover"].forEach((name) =>
+        dropzone.addEventListener(name, (e) => {
+          e.preventDefault();
+          dropzone.classList.add("drag");
+        }),
+      );
+      ["dragleave", "drop"].forEach((name) =>
+        dropzone.addEventListener(name, () =>
+          dropzone.classList.remove("drag"),
+        ),
+      );
+      dropzone.addEventListener("drop", (e) => {
+        e.preventDefault();
+        if (e.dataTransfer.files.length !== 1) {
+          formError("file", "一次請選擇一個音訊檔案。", "file");
+          return;
+        }
+        $("file").files = e.dataTransfer.files;
+        fileDescription();
+      });
+      for (const key of ["url", "file", "feed"])
+        $("panel-" + key).onsubmit = (e) => {
+          e.preventDefault();
+          submit(key);
         };
-        actions.appendChild(delBtn);
+      async function submit(key) {
+        const button = $("submit-" + key);
+        if (button.disabled) return;
+        $("message-" + key).textContent = "";
+        const fd = new FormData();
+        if (key === "file") {
+          const f = $("file").files[0];
+          if (!f) return formError(key, "請選擇檔案", "file");
+          if (!/\.(m4a|mp3|wav|aac|ogg|flac|mp4)$/i.test(f.name))
+            return formError(key, "請選擇支援的音訊或影片格式。", "file");
+          if (f.size === 0)
+            return formError(key, "檔案是空的，請重新選擇。", "file");
+          if (f.size > __MAXBYTES__)
+            return formError(
+              key,
+              "檔案超過 __MAXMB__ MB 上限，請先壓縮或分段。",
+              "file",
+            );
+          fd.append("file", f);
+        } else {
+          const value = $(key).value.trim();
+          if (!value)
+            return formError(
+              key,
+              key === "url" ? "請輸入網址" : "請輸入 RSS 網址",
+              key,
+            );
+          if (!validUrl(value))
+            return formError(key, "請輸入完整的 http 或 https 網址。", key);
+          fd.append(key === "feed" ? "feed_url" : "url", value);
+        }
+        if (key === "feed") {
+          const limit = Number($("feedLimit").value);
+          if (!Number.isInteger(limit) || limit < 1 || limit > __MAXFEED__)
+            return formError(
+              key,
+              "請輸入 1 到 __MAXFEED__ 之間的集數。",
+              "feedLimit",
+            );
+          fd.append("limit", limit);
+        } else fd.append("topic", $("topic-" + key).value.trim());
+        fd.append("language", $("lang-" + key).value);
+        fd.append("batch_size", $("batch-" + key).value);
+        const label = button.textContent;
+        button.disabled = true;
+        button.textContent = key === "file" ? "上傳中，請稍候…" : "建立任務中…";
+        $("message-" + key).textContent =
+          key === "file" ? "正在上傳，完成前請保持此頁開啟。" : "正在建立任務…";
+        try {
+          const d = await api("/transcribe_" + key, {
+            method: "POST",
+            body: fd,
+          });
+          $("message-" + key).textContent =
+            "任務已建立，可在「任務」查看進度。";
+          if (key === "feed") {
+            $("feedStatus").textContent = d.count
+              ? `已排入 ${d.count} 集，到「任務」查看各集進度。`
+              : "這個 RSS 沒有可轉錄的音訊集數。";
+          } else {
+            pollJob(d.job_id);
+            $("resultSection").scrollIntoView({
+              behavior: "smooth",
+              block: "nearest",
+            });
+          }
+        } catch (e) {
+          formError(key, e.message);
+        } finally {
+          button.disabled = false;
+          button.textContent = label;
+        }
       }
-
-      row.appendChild(badge);
-      row.appendChild(titleEl);
-      row.appendChild(metaEl);
-      row.appendChild(actions);
-      box.appendChild(row);
-    });
-  } catch (e) {
-    box.textContent = '載入失敗: ' + e.message;
-  }
-}
-
-async function viewJobResult(jobId) {
-  statusEl.textContent = '載入中…';
-  try {
-    const d = await (await fetch('/job/' + jobId)).json();
-    if (d.status !== 'done') { statusEl.textContent = '狀態: ' + d.status; return; }
-    statusEl.textContent = `${d.language} · ${d.duration.toFixed(1)}s`;
-    resultEl.value = d.text;
-  } catch (e) {
-    statusEl.textContent = '載入失敗: ' + e.message;
-  }
-}
-
-async function pollGpu() {
-  const el = document.getElementById('gpu');
-  try {
-    const d = await (await fetch('/gpu')).json();
-    if (!d.available) { el.textContent = 'GPU: 無法讀取 ' + (d.error || ''); return; }
-    const pwr = d.power != null ? d.power.toFixed(0) + 'W' : 'N/A';
-    el.textContent = `GPU · 使用率 ${d.util}% · VRAM ${d.mem_used.toFixed(0)}/${d.mem_total.toFixed(0)} MiB · 功耗 ${pwr} · 溫度 ${d.temp.toFixed(0)}°C`;
-    el.className = 'gpubar' + (d.temp >= 85 ? ' hot' : d.temp >= 75 ? ' warm' : '');
-  } catch (e) {
-    el.textContent = 'GPU: 連線失敗';
-  }
-}
-setInterval(pollGpu, 2000);
-pollGpu();
-</script>
-</body>
+      function jobStage(j) {
+        const names = {
+          queued: "排隊中",
+          starting: "準備中",
+          downloading: "下載音訊中",
+          validating: "檢查音訊中",
+          transcribing: "轉錄中",
+          saving: "儲存逐字稿中",
+          done: "已完成",
+        };
+        return (
+          (names[j.stage] || labels[j.status] || "處理中") +
+          (j.progress == null ? "…" : ` · ${j.progress}%`)
+        );
+      }
+      function duration(value) {
+        const sec = Math.max(0, Math.round(Number(value) || 0));
+        return `${Math.floor(sec / 60)} 分 ${sec % 60} 秒`;
+      }
+      function showResult(d, id) {
+        $("resultTitle").textContent = d.topic || "你的逐字稿";
+        $("resultBadge").textContent = "已完成";
+        statusEl.textContent = `轉錄完成 · ${d.language || "自動偵測"} · ${duration(d.duration)}`;
+        $("progress").hidden = true;
+        $("resultEmpty").hidden = true;
+        $("resultContent").hidden = false;
+        resultEl.value = d.text || "";
+        $("resultMeta").textContent =
+          `${(d.text || "").length.toLocaleString()} 字元 · 原始逐字稿 · SRT 下載包含時間軸`;
+        for (const [el, format] of [
+          ["exportSrt", "srt"],
+          ["exportMarkdown", "markdown"],
+          ["exportJson", "json"],
+        ])
+          $(el).href =
+            "/job/" + encodeURIComponent(id) + "/export?format=" + format;
+      }
+      function pollJob(id) {
+        clearTimeout(pollTimer);
+        const version = ++pollVersion;
+        activeJob = id;
+        $("resumePoll").hidden = true;
+        $("resultContent").hidden = true;
+        $("resultEmpty").hidden = false;
+        $("resultTitle").textContent = "你的逐字稿";
+        $("resultBadge").textContent = "處理中";
+        statusEl.textContent = "正在取得任務進度…";
+        $("progress").hidden = false;
+        $("progress").removeAttribute("value");
+        resultEl.value = "";
+        drawJobs(true);
+        const tick = async () => {
+          try {
+            const d = await api("/job/" + encodeURIComponent(id));
+            if (version !== pollVersion) return;
+            $("resultTitle").textContent = d.topic || "你的逐字稿";
+            $("resultBadge").textContent = labels[d.status] || "處理中";
+            if (d.status === "done") {
+              showResult(d, id);
+              return;
+            }
+            if (d.status === "error") {
+              statusEl.textContent =
+                "任務處理失敗：" +
+                (d.error || "未知錯誤") +
+                (d.retry_hint ? " · " + d.retry_hint : "") +
+                "。可到「任務」重試。";
+              $("progress").hidden = true;
+              return;
+            }
+            statusEl.textContent =
+              d.status === "queued"
+                ? "排隊中，輪到這個任務後會自動開始。"
+                : jobStage(d);
+            if (d.progress == null) $("progress").removeAttribute("value");
+            else $("progress").value = d.progress;
+            pollTimer = setTimeout(tick, 3000);
+          } catch (e) {
+            if (version !== pollVersion) return;
+            statusEl.textContent = "查詢失敗：" + e.message;
+            $("progress").hidden = true;
+            $("resumePoll").hidden = false;
+            $("resultBadge").textContent = "連線中斷";
+          }
+        };
+        tick();
+      }
+      $("resumePoll").onclick = () => activeJob && pollJob(activeJob);
+      function viewJobResult(id) {
+        pollJob(id);
+        $("resultSection").scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+        });
+      }
+      $("copyResult").onclick = async () => {
+        try {
+          await navigator.clipboard.writeText(resultEl.value);
+          toast("已複製全文");
+        } catch {
+          resultEl.focus();
+          resultEl.select();
+          toast("請按 Ctrl+C（Mac：⌘C）複製已選取的文字。");
+        }
+      };
+      $("downloadText").onclick = () => {
+        const url = URL.createObjectURL(
+          new Blob([resultEl.value], { type: "text/plain;charset=utf-8" }),
+        );
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "transcript.txt";
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      };
+      function el(tag, className, text) {
+        const n = document.createElement(tag);
+        if (className) n.className = className;
+        if (text != null) n.textContent = text;
+        return n;
+      }
+      function action(label, fn, danger = false) {
+        const b = el("button", "btn-sm" + (danger ? " danger" : ""), label);
+        b.onclick = async (e) => {
+          e.stopPropagation();
+          b.disabled = true;
+          try {
+            await fn();
+            await renderJobs();
+          } catch (err) {
+            toast(err.message);
+          } finally {
+            b.disabled = false;
+          }
+        };
+        return b;
+      }
+      function drawJobs(force = false) {
+        const query = $("jobSearch").value.trim().toLowerCase(),
+          filter = $("jobFilter").value;
+        const signature = JSON.stringify([jobs, query, filter, activeJob]);
+        if (!force && signature === jobsSignature) return;
+        jobsSignature = signature;
+        const box = $("jobsList");
+        box.replaceChildren();
+        box.appendChild(
+          el(
+            "div",
+            "jobs-header",
+            `共 ${jobs.length} 筆 · ${jobs.filter((j) => j.status === "queued").length} 筆排隊中`,
+          ),
+        );
+        const visible = jobs.filter(
+          (j) =>
+            (j.topic || j.id).toLowerCase().includes(query) &&
+            (filter === "all" ||
+              (filter === "active"
+                ? ["running", "queued"].includes(j.status)
+                : j.status === filter)),
+        );
+        if (!visible.length) {
+          box.appendChild(
+            el(
+              "div",
+              "jobs-empty",
+              jobs.length
+                ? "沒有符合條件的任務。試試其他關鍵字或狀態。"
+                : "還沒有任務。貼上連結或上傳音檔，建立第一份逐字稿。",
+            ),
+          );
+          return;
+        }
+        visible.forEach((j) => {
+          const row = el(
+              "div",
+              "jobrow" + (j.id === activeJob ? " selected" : ""),
+            ),
+            heading = el("div", "job-heading"),
+            title = el("div", "job-title");
+          const open = el("button", "", j.topic || "未命名轉錄");
+          open.onclick = () => viewJobResult(j.id);
+          title.appendChild(open);
+          heading.append(
+            title,
+            el(
+              "span",
+              "badge " + j.status,
+              j.status === "running"
+                ? jobStage(j)
+                : labels[j.status] || j.status,
+            ),
+          );
+          row.appendChild(heading);
+          const when = new Date(j.created_at);
+          const time = Number.isNaN(when.getTime())
+            ? ""
+            : when.toLocaleString("zh-TW", {
+                month: "short",
+                day: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              });
+          row.appendChild(
+            el(
+              "div",
+              "job-meta",
+              ({ file: "檔案上傳", url: "連結", feed: "Podcast" }[j.type] ||
+                "轉錄") +
+                " · " +
+                time,
+            ),
+          );
+          const actions = el("div", "job-actions");
+          if (j.status === "done") {
+            actions.appendChild(
+              action("閱讀逐字稿", () => viewJobResult(j.id)),
+            );
+            for (const [format, label] of [
+              ["json", "JSON"],
+              ["markdown", "Markdown"],
+              ["srt", "SRT"],
+            ]) {
+              const a = el("a", "btn-sm", label);
+              a.href =
+                "/job/" + encodeURIComponent(j.id) + "/export?format=" + format;
+              actions.appendChild(a);
+            }
+          } else if (j.status === "queued")
+            actions.appendChild(
+              action("取消", () =>
+                api("/job/" + encodeURIComponent(j.id) + "/cancel", {
+                  method: "POST",
+                }),
+              ),
+            );
+          else if (j.status === "error") {
+            actions.appendChild(
+              action("重試", async () => {
+                const d = await api(
+                  "/job/" + encodeURIComponent(j.id) + "/retry",
+                  { method: "POST" },
+                );
+                pollJob(d.job_id || j.id);
+              }),
+            );
+          }
+          if (j.status !== "running")
+            actions.appendChild(
+              action(
+                "刪除",
+                async () => {
+                  if (
+                    !confirm("確定刪除這個任務與對應的逐字稿？此操作無法復原。")
+                  )
+                    return;
+                  await api("/job/" + encodeURIComponent(j.id), {
+                    method: "DELETE",
+                  });
+                  if (activeJob === j.id) {
+                    clearTimeout(pollTimer);
+                    ++pollVersion;
+                    activeJob = null;
+                    $("resultContent").hidden = true;
+                    $("resultEmpty").hidden = false;
+                    $("progress").hidden = true;
+                    $("resumePoll").hidden = true;
+                    $("resultTitle").textContent = "你的逐字稿";
+                    $("resultBadge").textContent = "等待開始";
+                    statusEl.textContent = "任務已刪除。";
+                    resultEl.value = "";
+                  }
+                },
+                true,
+              ),
+            );
+          row.appendChild(actions);
+          if (j.status === "error")
+            row.appendChild(
+              el(
+                "div",
+                "job-error",
+                (j.error || "") + (j.retry_hint ? " · " + j.retry_hint : ""),
+              ),
+            );
+          box.appendChild(row);
+        });
+      }
+      async function renderJobs() {
+        if (jobsLoading) return;
+        jobsLoading = true;
+        try {
+          const d = await api("/jobs");
+          jobs = d.jobs;
+          drawJobs();
+        } catch (e) {
+          jobsSignature = "";
+          $("jobsList").textContent =
+            "載入失敗：" + e.message + " 點「重新整理任務」再試一次。";
+        } finally {
+          jobsLoading = false;
+        }
+      }
+      $("jobSearch").oninput = () => drawJobs();
+      $("jobFilter").onchange = () => drawJobs();
+      $("refreshJobs").onclick = () => renderJobs();
+      async function cancelAll() {
+        if (!confirm("確定取消所有排隊中的任務？正在轉錄的任務會繼續。"))
+          return;
+        try {
+          const d = await api("/jobs/cancel-all", { method: "POST" });
+          $("cancelMsg").textContent = d.message;
+          await renderJobs();
+        } catch (e) {
+          $("cancelMsg").textContent = "取消失敗：" + e.message;
+        }
+      }
+      async function pollGpu() {
+        try {
+          const d = await api("/gpu");
+          if (!d.available) {
+            $("gpu").textContent =
+              "GPU 資訊暫時無法取得；轉錄狀態請見任務進度。";
+            return;
+          }
+          $("gpu").textContent =
+            `GPU 使用率 ${d.util}% · 記憶體 ${Math.round(d.mem_used)} / ${Math.round(d.mem_total)} MiB · 溫度 ${Math.round(d.temp)}°C`;
+          $("gpu").className = "gpubar" + (d.temp >= 85 ? " hot" : "");
+        } catch {
+          $("gpu").textContent = "服務狀態暫時無法取得。";
+        }
+      }
+      const service = document.querySelector(".service");
+      let gpuTimer;
+      service.addEventListener("toggle", () => {
+        clearInterval(gpuTimer);
+        if (service.open) {
+          pollGpu();
+          gpuTimer = setInterval(pollGpu, 5000);
+        }
+      });
+    </script>
+  </body>
 </html>

@@ -131,3 +131,15 @@ K3s Service 已加 scrape annotations；要保存歷史圖表仍需自行接 Pro
 ### 來源紀錄與匯出
 
 完成工作會顯示 JSON / Markdown / SRT 下載連結。API：`GET /job/{id}/export?format=json|markdown|srt`；未完成回 409。JSON 和 Markdown 包含來源、模型設定、語言、批次大小與工作時間，不暴露上傳音檔的伺服器路徑。歷史工作沒有紀錄的模型設定保留 null，不推測補填。
+
+### Voice Notes 轉錄工作台
+
+開啟 STT 服務首頁（使用 ai-finance-infra Docker Compose 時為 `http://localhost:8001`；單獨啟動預設為 `http://localhost:8000`）：
+
+- **貼上連結**：輸入 YouTube、Podcast 單集或直接音訊網址，選擇語言後開始轉錄。
+- **上傳檔案**：點選或拖入一個音訊／影片檔，畫面會顯示檔名、大小及服務設定的限制。上傳完成前請保持頁面開啟。
+- **Podcast RSS**：輸入 RSS 網址與集數，由新到舊建立各集任務；集數上限依服務設定顯示。
+- **任務**：搜尋近期任務，依處理中、已完成或未完成篩選；開啟任務可查看進度與逐字稿，失敗時可重試。刪除與取消全部排隊任務會先確認。
+- **逐字稿**：直接閱讀、複製全文，或下載 TXT、SRT 字幕、Markdown、JSON。透過未啟用 HTTPS 的遠端地址使用時，若瀏覽器限制剪貼簿，會自動選取全文並提示手動複製。
+
+任務建立後可離開頁面，稍後從「任務」重新開啟；清單依 `JOBS_WINDOW_HOURS` 設定顯示近期任務。進階設定包含處理批次大小，模型與 GPU 狀態收在頁面底部。手機版上下排列，來源分頁支援方向鍵、Home、End 操作。

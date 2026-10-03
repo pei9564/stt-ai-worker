@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+from html import escape
 
 from app.config import Settings
 
@@ -22,9 +23,10 @@ _BATCH_CHOICES = [
 ]
 
 
-def _batch_opts(batch_size: int) -> str:
+def _batch_opts(batch_size: int, max_batch_size: int = 16) -> str:
     """產生批次大小下拉選單；.env 設定值若不在預設清單中，額外補一個選項。"""
-    options = list(_BATCH_CHOICES)
+    batch_size = min(max(1, batch_size), max_batch_size)
+    options = [(value, label) for value, label in _BATCH_CHOICES if value <= max_batch_size]
     if batch_size not in {val for val, _ in options}:
         options.insert(0, (batch_size, f"{batch_size} (.env 設定)"))
     return "".join(
@@ -43,9 +45,15 @@ class WebUI:
     def render_index(self) -> str:
         s = self._settings
         return (
-            self._template.replace("__MODEL__", s.model)
-            .replace("__DEVICE__", s.device)
+            self._template.replace("__MODEL__", escape(s.model))
+            .replace("__DEVICE__", escape(s.device))
             .replace("__BATCH__", str(s.batch_size))
+            .replace("__WINDOW__", str(s.jobs_window_hours))
+            .replace("__MAXBYTES__", str(s.max_upload_bytes))
+            .replace("__MAXMB__", str(round(s.max_upload_bytes / 1024 / 1024, 1)))
+            .replace("__MAXMINUTES__", str(round(s.max_audio_seconds / 60, 1)))
+            .replace("__MAXFEED__", str(s.max_feed_episodes))
+            .replace("__DEFAULTFEED__", str(min(3, s.max_feed_episodes)))
             .replace("__LANGOPTS__", _LANG_OPTS)
-            .replace("__BATCHOPTS__", _batch_opts(s.batch_size))
+            .replace("__BATCHOPTS__", _batch_opts(s.batch_size, s.max_batch_size))
         )
