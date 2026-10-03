@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from app.api.web import WebUI
 from app.config import Settings
+from app.services.notes import NotesService
 from app.domain.ports import TranscriptRepository
 from app.services.job_service import JobService
 from app.services.transcription import TranscriptionService
@@ -22,3 +23,4 @@ class Container:
     transcription_service: TranscriptionService
     worker: TranscriptionWorker
     transcripts: TranscriptRepository
+    notes: NotesService

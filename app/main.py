@@ -56,6 +56,7 @@ def create_app(
     job_repository: JobRepository | None = None,
     transcript_repository: TranscriptRepository | None = None,
     run_worker: bool = True,
+    notes_client=None,
 ) -> FastAPI:
     """組裝並回傳 FastAPI app。
 
@@ -111,6 +112,8 @@ def create_app(
     )
     worker = TranscriptionWorker(job_service, transcription_service, max_job_seconds=settings.max_job_seconds, observer=observer)
 
+    from app.services.notes import NotesService
+    notes = NotesService(job_service, settings, notes_client)
     container = Container(
         settings=settings,
         web_ui=WebUI(settings),
@@ -118,6 +121,7 @@ def create_app(
         transcription_service=transcription_service,
         worker=worker,
         transcripts=transcript_repository,
+        notes=notes,
     )
 
     @asynccontextmanager
@@ -148,10 +152,11 @@ def create_app(
             await monitor_task
         except asyncio.CancelledError:
             pass
+        notes.close()
         observer.stop()
         if run_worker:
             worker.stop()
-        if pool is not None and not worker.is_alive:
+        if pool is not None and not worker.is_alive and not notes.is_alive:
             pool.close()
         elif pool is not None:
             # 長任務尚在執行時不要提早關閉它使用的連線池。

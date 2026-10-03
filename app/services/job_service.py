@@ -183,10 +183,22 @@ class JobService:
             mutate(job)
             self._repo.save(job)
 
+    def update_note(self, job_id, mode, state):
+        def mutate(job):
+            job.details.setdefault('notes', {})[mode] = state
+        self._transition(job_id, mutate)
+
     def recover_interrupted(self) -> None:
         """恢復 queued / running 任務；舊版沒有來源的紀錄標記 error。"""
         with self._lock:
             for job in self._repo.all():
+                interrupted = False
+                for note in job.details.get('notes', {}).values():
+                    if note.get('status') == 'running':
+                        note.update(status='error', error='服務重新啟動，請重新產生 AI 整理。')
+                        interrupted = True
+                if interrupted:
+                    self._repo.save(job)
                 if job.status in (JobStatus.QUEUED, JobStatus.RUNNING):
                     if job.source is None:
                         job.mark_error("任務缺少音檔來源，請重新提交")

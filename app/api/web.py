@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+import os
 from html import escape
 
 from app.config import Settings
@@ -48,6 +49,8 @@ class WebUI:
             self._template.replace("__MODEL__", escape(s.model))
             .replace("__DEVICE__", escape(s.device))
             .replace("__BATCH__", str(s.batch_size))
+            .replace("__SCRAPER_URL__", escape(s.scraper_public_url, quote=True))
+            .replace("__SCRAPER_PORT__", escape(os.getenv("SCRAPER_PUBLIC_PORT", "8080"), quote=True))
             .replace("__WINDOW__", str(s.jobs_window_hours))
             .replace("__MAXBYTES__", str(s.max_upload_bytes))
             .replace("__MAXMB__", str(round(s.max_upload_bytes / 1024 / 1024, 1)))

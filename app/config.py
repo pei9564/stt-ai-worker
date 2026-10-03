@@ -23,6 +23,11 @@ class Settings:
     max_feed_episodes: int = 20
     max_batch_size: int = 16
     max_job_seconds: int = 7200
+    vllm_base_url: str = ''
+    vllm_model: str = ''
+    vllm_api_key: str = ''
+    llm_timeout_seconds: int = 120
+    scraper_public_url: str = ''
 
 
 def load_settings() -> Settings:
@@ -35,6 +40,11 @@ def load_settings() -> Settings:
         batch_size=int(os.getenv("BATCH_SIZE", "4")),
         db_url=os.environ["DB_URL"],
         jobs_window_hours=int(os.getenv("JOBS_WINDOW_HOURS", "48")),
+        vllm_base_url=os.getenv('VLLM_BASE_URL', ''),
+        vllm_model=os.getenv('VLLM_MODEL', ''),
+        vllm_api_key=os.getenv('VLLM_API_KEY', ''),
+        llm_timeout_seconds=_positive('LLM_TIMEOUT_SECONDS', 120),
+        scraper_public_url=os.getenv('SCRAPER_PUBLIC_URL', ''),
         **{name: _positive(env, default) for name, env, default in (
             ('max_upload_bytes', 'MAX_UPLOAD_BYTES', 512 * 1024 * 1024),
             ('max_audio_seconds', 'MAX_AUDIO_SECONDS', 7200),

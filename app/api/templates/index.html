@@ -668,6 +668,33 @@
         font-size: 12px;
         color: var(--muted);
       }
+      .notes-output {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        max-height: 500px;
+        overflow: auto;
+        line-height: 1.9;
+        background: var(--bg);
+        border-radius: 12px;
+        padding: 16px;
+      }
+      .notes-output:empty {
+        display: none;
+      }
+      .notes-section {
+        border-top: 1px solid var(--line);
+        margin-top: 24px;
+        padding-top: 22px;
+      }
+      .cross-link {
+        font-size: 13px;
+        white-space: nowrap;
+      }
+      @media (max-width: 380px) {
+        .topbar {
+          flex-wrap: wrap;
+        }
+      }
     </style>
   </head>
   <body>
@@ -681,7 +708,13 @@
             <div class="eyebrow">YOUR WORDS, IN WRITING</div>
           </div>
         </div>
-        <span class="top-note">音訊、影片與 Podcast 的文字工作台</span>
+        <a
+          class="cross-link"
+          id="financeLink"
+          data-url="__SCRAPER_URL__"
+          data-port="__SCRAPER_PORT__"
+          >開啟 Finance Brief ↗</a
+        >
       </header>
       <div class="hero">
         <h1>把聲音，變成可以帶走的文字。</h1>
@@ -983,6 +1016,26 @@
             ></div>
             <textarea id="result" readonly aria-label="逐字稿內容"></textarea>
             <p class="meta" id="resultMeta"></p>
+            <section class="notes-section" aria-labelledby="notesTitle">
+              <h3 id="notesTitle">AI 整理</h3>
+              <p class="hint" id="notesConfig">
+                AI 整理可能有誤，請對照原始逐字稿。
+              </p>
+              <div class="reader-controls">
+                <select id="notesMode" aria-label="AI 整理方式">
+                  <option value="summary">重點摘要</option>
+                  <option value="minutes">會議紀錄</option>
+                  <option value="actions">待辦事項</option></select
+                ><button id="generateNotes">產生整理</button
+                ><button id="refreshNotes">重新載入整理</button>
+              </div>
+              <p id="notesStatus" role="status" class="hint"></p>
+              <div id="notesText" class="notes-output"></div>
+              <div id="notesDownloads" class="toolbar" hidden>
+                <a id="notesMarkdown">下載整理 Markdown</a
+                ><a id="notesJson">下載整理 JSON</a>
+              </div>
+            </section>
           </div>
         </section>
       </main>
@@ -1240,6 +1293,7 @@
         $("resultEmpty").hidden = true;
         $("resultContent").hidden = false;
         resultEl.value = d.text || "";
+        loadNotes(id);
         segments = parseSrt(d.srt);
         renderTranscript();
         $("resultMeta").textContent =
@@ -1253,6 +1307,7 @@
             "/job/" + encodeURIComponent(id) + "/export?format=" + format;
       }
       function pollJob(id) {
+        resetNotes();
         clearTimeout(pollTimer);
         const version = ++pollVersion;
         activeJob = id;
@@ -1306,6 +1361,7 @@
             if (version !== pollVersion) return;
             if (e.status === 404) {
               activeJob = null;
+              resetNotes();
               saveWorkspace();
               statusEl.textContent =
                 "這個任務已不存在，請從「任務」選擇其他項目。";
@@ -1500,6 +1556,7 @@
                     clearTimeout(pollTimer);
                     ++pollVersion;
                     activeJob = null;
+                    resetNotes();
                     saveWorkspace();
                     document.title = baseTitle;
                     $("resultContent").hidden = true;
@@ -1587,6 +1644,13 @@
         }
       });
       function saveWorkspace() {
+        try {
+          const url = new URL(location.href);
+          if (activeJob) url.searchParams.set("job", activeJob);
+          else url.searchParams.delete("job");
+          history.replaceState(null, "", url);
+        } catch {}
+
         try {
           localStorage.setItem(
             stateKey,
@@ -1909,10 +1973,141 @@
           state.job.length < 200
         )
           activeJob = state.job;
+        const linkedJob = new URL(location.href).searchParams.get("job");
+        if (linkedJob && linkedJob.length < 200) {
+          activeJob = linkedJob;
+          currentTab = "jobs";
+        }
         switchTab(currentTab);
         updateNotificationControl();
         if (activeJob) pollJob(activeJob);
       }
+      let notesTimer = null,
+        notesVersion = 0,
+        notesMode = "summary",
+        notesData = {},
+        notesJob = null,
+        notesEnabled = false;
+      const noteLabels = {
+        summary: "重點摘要",
+        minutes: "會議紀錄",
+        actions: "待辦事項",
+      };
+      function resetNotes() {
+        clearTimeout(notesTimer);
+        ++notesVersion;
+        notesJob = null;
+        notesData = {};
+        $("notesText").textContent = "";
+        $("notesDownloads").hidden = true;
+        $("notesStatus").textContent = "";
+      }
+      async function loadNotes(id) {
+        resetNotes();
+        notesJob = id;
+        const version = notesVersion;
+        const refresh = async () => {
+          try {
+            const data = await api("/job/" + encodeURIComponent(id) + "/notes");
+            if (version !== notesVersion || activeJob !== id) return;
+            notesData = data.notes || {};
+            notesEnabled = data.enabled;
+            $("generateNotes").disabled = !data.enabled;
+            $("notesConfig").textContent = data.enabled
+              ? "AI 整理可能有誤，請對照原始逐字稿。"
+              : "尚未設定 AI 服務，請設定 VLLM_BASE_URL 與 VLLM_MODEL。";
+            renderNotes();
+            if (Object.values(notesData).some((n) => n.status === "running"))
+              notesTimer = setTimeout(refresh, 2000);
+          } catch (e) {
+            if (version === notesVersion) {
+              $("notesStatus").textContent = "無法載入 AI 整理：" + e.message;
+              $("generateNotes").disabled = false;
+            }
+          }
+        };
+        await refresh();
+      }
+      function renderNotes() {
+        const note = notesData[notesMode] || {};
+        $("notesText").textContent = note.text || "";
+        $("notesDownloads").hidden = note.status !== "done";
+        $("notesStatus").textContent =
+          note.status === "running"
+            ? `${note.stage} · 已整理 ${note.completed || 0} / ${note.chunks || 0} 段`
+            : note.status === "error"
+              ? note.error
+              : note.status === "done"
+                ? `${noteLabels[notesMode]} · ${note.model || "AI"} · ${new Date(note.generated_at).toLocaleString("zh-TW")}`
+                : "選擇整理方式，再按「產生整理」。";
+        $("generateNotes").textContent =
+          note.status === "error"
+            ? "重試整理"
+            : note.status === "done"
+              ? "已產生"
+              : note.status === "running"
+                ? "整理中…"
+                : "產生整理";
+        if (["running", "done"].includes(note.status))
+          $("generateNotes").disabled = true;
+        for (const [id, format] of [
+          ["notesMarkdown", "markdown"],
+          ["notesJson", "json"],
+        ])
+          $(id).href =
+            "/job/" +
+            encodeURIComponent(notesJob) +
+            "/notes/" +
+            notesMode +
+            "/export?format=" +
+            format;
+      }
+      $("notesMode").onchange = () => {
+        notesMode = $("notesMode").value;
+        $("generateNotes").disabled = !notesEnabled;
+        renderNotes();
+      };
+      $("refreshNotes").onclick = () => activeJob && loadNotes(activeJob);
+      $("generateNotes").onclick = async () => {
+        const id = activeJob,
+          mode = notesMode,
+          version = notesVersion;
+        $("generateNotes").disabled = true;
+        $("notesStatus").textContent = "正在提交整理…";
+        try {
+          await api("/job/" + encodeURIComponent(id) + "/notes/" + mode, {
+            method: "POST",
+          });
+          if (version === notesVersion && id === activeJob) await loadNotes(id);
+        } catch (e) {
+          if (version === notesVersion) {
+            $("notesStatus").textContent = e.message;
+            $("generateNotes").disabled = false;
+          }
+        }
+      };
+      function publicLink(config, port) {
+        try {
+          const url = config
+            ? new URL(config, location.href)
+            : new URL(location.origin);
+          if (!config) {
+            url.port = port;
+            url.pathname = "/";
+          }
+          if (!["http:", "https:"].includes(url.protocol)) return null;
+          return url.href;
+        } catch {
+          return null;
+        }
+      }
+      const financeLink = publicLink(
+        $("financeLink").dataset.url,
+        $("financeLink").dataset.port,
+      );
+      if (financeLink) $("financeLink").href = financeLink;
+      else $("financeLink").hidden = true;
+
       restoreWorkspace();
     </script>
   </body>

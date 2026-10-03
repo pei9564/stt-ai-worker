@@ -300,3 +300,35 @@ def export_job(job_id: str, format: str = 'json', container: Container = Depends
         raise HTTPException(422, detail='format: json / markdown / srt')
     return Response(content, media_type=media,
                     headers={'Content-Disposition': f'attachment; filename="transcript.{ext}"'})
+
+
+@router.get('/job/{job_id}/notes')
+def get_notes(job_id: str, container: Container = Depends(get_container)):
+    job = container.job_service.get(job_id)
+    if not job:
+        raise HTTPException(404, '找不到任務')
+    return {'enabled': container.notes.client.enabled, 'notes': dict(job.details.get('notes', {}))}
+
+
+@router.post('/job/{job_id}/notes/{mode}', status_code=202)
+def create_notes(job_id: str, mode: str, container: Container = Depends(get_container)):
+    from app.services.notes import NotesError
+    try:
+        return container.notes.start(job_id, mode)
+    except NotesError as exc:
+        raise HTTPException(exc.status, str(exc)) from exc
+
+
+@router.get('/job/{job_id}/notes/{mode}/export')
+def export_notes(job_id: str, mode: str, format: str = 'markdown', container: Container = Depends(get_container)):
+    from app.services.notes import MODES
+    if mode not in MODES or format not in ('markdown', 'json'):
+        raise HTTPException(422, '不支援的格式或整理類型')
+    data = get_notes(job_id, container)['notes'].get(mode, {})
+    if data.get('status') != 'done':
+        raise HTTPException(409, '尚無完成的整理結果')
+    payload = dict(data, job_id=job_id, mode=mode)
+    if format == 'json':
+        return JSONResponse(payload, headers={'Content-Disposition': f'attachment; filename="{mode}.json"'})
+    body = f"# {MODES[mode]}\n\n{data['text']}\n\n---\nAI 整理，請對照原始逐字稿。\n模型：{data.get('model', '')}\n產生時間：{data.get('generated_at', '')}\n"
+    return Response(body, media_type='text/markdown', headers={'Content-Disposition': f'attachment; filename="{mode}.md"'})
