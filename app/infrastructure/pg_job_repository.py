@@ -16,7 +16,7 @@ _SELECT_COLS = """
     j.id, j.type, j.topic, j.language, j.batch_size, j.status,
     j.created_at, j.started_at, j.finished_at,
     j.transcript_id, j.error,
-    t.language, t.duration, t.text, t.srt, j.source
+    t.language, t.duration, t.text, t.srt, j.source, j.details
 """
 
 
@@ -25,7 +25,7 @@ def _row_to_job(row: tuple) -> Job:
         jid, jtype, topic, language, batch_size, status,
         created_at, started_at, finished_at,
         transcript_id, error,
-        t_language, t_duration, t_text, t_srt, source,
+        t_language, t_duration, t_text, t_srt, source, details,
     ) = row
 
     result: JobResult | None = None
@@ -51,6 +51,7 @@ def _row_to_job(row: tuple) -> Job:
         result=result,
         error=error,
         source=deserialize_source(source),
+        details=details or {},
     )
 
 
@@ -77,16 +78,17 @@ class PostgresJobRepository:
             INSERT INTO jobs (
                 id, type, topic, language, batch_size, status,
                 created_at, started_at, finished_at,
-                transcript_id, error, source
+                transcript_id, error, source, details
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET
                 status        = EXCLUDED.status,
                 started_at    = EXCLUDED.started_at,
                 finished_at   = EXCLUDED.finished_at,
                 transcript_id = EXCLUDED.transcript_id,
                 error         = EXCLUDED.error,
-                source        = EXCLUDED.source
+                source        = EXCLUDED.source,
+                details       = EXCLUDED.details
             """,
             (
                 job.id,
@@ -101,6 +103,7 @@ class PostgresJobRepository:
                 tid,
                 job.error,
                 Jsonb(source) if source is not None else None,
+                Jsonb(job.details),
             ),
         )
 

@@ -96,3 +96,12 @@ Compose 沒有 Kubernetes liveness 控制器，逾時後請自行 restart STT。
 LLM HTTP timeout 用 `LLM_TIMEOUT_SECONDS`（120），空白／格式錯誤回覆視為失敗。
 scraper STT 輪詢由 `STT_TIMEOUT_SECONDS` 控制；infra 預設 7200 秒，
 超時只停止等候，不會取消遠端工作，可到 STT UI 查看它。
+
+## 任務階段與錯誤提示
+
+STT 工作提供 `stage`、`progress`、`error_code`、`retry_hint`，PG 的 details JSONB 保存階段與進度。
+下載／驗證／轉錄／儲存各有名稱，轉錄百分比依已處理音訊時間估算，更新最多約每 5 秒或 5%。
+下載時間未知時不顯示假百分比；完成為 100%。失敗保留最後階段，UI 顯示可執行的重試建議。
+scraper 保存遠端 STT job ID，重啟後查詢會繼續等候既有工作；不會因查詢而自動重試失敗工作。
+使用者再次按送 STT 才重試原失敗工作；不存在的工作才重新提交。
+翻譯／摘要沿用批次逐筆進度，API status 另附階段名稱與重試提示。

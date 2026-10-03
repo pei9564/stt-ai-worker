@@ -26,7 +26,7 @@ class WhisperTranscriber:
         log.info("model ready")
 
     def transcribe(
-        self, audio_path: Path, language: str | None, batch_size: int
+        self, audio_path: Path, language: str | None, batch_size: int, on_progress=None
     ) -> TranscriptResult:
         lang = (language or "").strip() or None
         if batch_size and batch_size > 1:
@@ -38,10 +38,15 @@ class WhisperTranscriber:
                 str(audio_path), language=lang, vad_filter=True
             )
 
-        parsed = tuple(
-            TranscriptSegment(start=seg.start, end=seg.end, text=seg.text.strip())
-            for seg in segments
-        )
+        parsed_list = []
+        for seg in segments:
+            parsed_list.append(TranscriptSegment(start=seg.start, end=seg.end, text=seg.text.strip()))
+            if on_progress and info.duration:
+                on_progress(100 * seg.end / info.duration)
+        parsed = tuple(parsed_list)
         return TranscriptResult(
             language=info.language, duration=info.duration, segments=parsed
         )
+
+    def transcribe_with_progress(self, audio_path, language, batch_size, on_progress):
+        return self.transcribe(audio_path, language, batch_size, on_progress)

@@ -129,3 +129,11 @@ def test_default_app_url_submission_completes_with_pg(pool, settings, monkeypatc
         assert result["status"] == "done", result
         assert result["text"] == "你好\n世界"
     assert seen == ["https://example.com/episode.mp3"]
+
+
+def test_progress_details_survive_pg_roundtrip(pool):
+    repo = PostgresJobRepository(pool)
+    job = Job('progress', JobType.URL, 'topic', 'zh', 4, source=YtDlpSource('https://video/x'),
+              details={'stage': 'transcribing', 'progress': 45, 'retry_hint': '分段後重試'})
+    repo.save(job)
+    assert repo.get(job.id).details == job.details

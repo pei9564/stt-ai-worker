@@ -43,6 +43,10 @@ class JobView(BaseModel):
     srt: str | None = None
     transcript_id: int | None = None
     error: str | None = None
+    stage: str = 'queued'
+    progress: int | None = None
+    error_code: str | None = None
+    retry_hint: str | None = None
 
 
 class DeletedResponse(BaseModel):
@@ -96,6 +100,10 @@ def to_job_view(job: Job, *, include_text: bool) -> JobView:
         created_at=_iso(job.created_at),
         started_at=_iso(job.started_at),
         finished_at=_iso(job.finished_at),
+        stage=job.details.get('stage', job.status.value),
+        progress=job.details.get('progress'),
+        error_code=job.details.get('error_code'),
+        retry_hint=job.details.get('retry_hint'),
     )
     if job.status == JobStatus.DONE and job.result is not None:
         view.transcript_id = job.result.transcript_id

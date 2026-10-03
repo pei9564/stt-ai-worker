@@ -92,12 +92,22 @@ class JobService:
             job = self._repo.get(job_id)
             if job is None or job.status != JobStatus.RUNNING:
                 return False
+            job.details.update(error_code='timeout', retry_hint='請重啟 STT，分段後重試')
             job.mark_error('任務處理逾時，服務需重啟；請分段後重試')
             self._repo.save(job)
             return True
 
-    def mark_error(self, job_id: str, message: str) -> None:
-        self._transition(job_id, lambda job: job.mark_error(message))
+    def mark_error(self, job_id: str, message: str, *, code='processing_failed', hint='請修正來源或設定後重試') -> None:
+        def mutate(job):
+            job.details.update(error_code=code, retry_hint=hint)
+            job.mark_error(message)
+        self._transition(job_id, mutate)
+
+    def update_progress(self, job_id: str, stage: str, progress: int | None = None) -> None:
+        def mutate(job):
+            if job.status == JobStatus.RUNNING:
+                job.details.update(stage=stage, progress=progress)
+        self._transition(job_id, mutate)
 
     def _transition(self, job_id: str, mutate) -> None:
         with self._lock:
@@ -127,6 +137,7 @@ class JobService:
         job.finished_at = None
         job.error = None
         job.result = None
+        job.details.update(stage="queued", progress=None, error_code=None, retry_hint=None)
 
     def retry(self, job_id: str) -> bool:
         """僅重新排隊失敗任務，避免重複執行 queued / running / done。"""

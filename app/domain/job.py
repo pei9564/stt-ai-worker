@@ -60,13 +60,16 @@ class Job:
     finished_at: datetime.datetime | None = None
     result: JobResult | None = None
     error: str | None = None
+    details: dict = field(default_factory=dict)
     source: AudioSource | None = field(default=None, repr=False, compare=False)
 
     def mark_running(self) -> None:
+        self.details.update(stage="starting", progress=None)
         self.status = JobStatus.RUNNING
         self.started_at = _now()
 
     def mark_done(self, result: JobResult) -> None:
+        self.details.update(stage="done", progress=100)
         self.status = JobStatus.DONE
         self.result = result
         self.finished_at = _now()

@@ -412,14 +412,14 @@ function pollJob(jobId) {
       if (d.status === 'queued') {
         statusEl.textContent = '排隊中…';
       } else if (d.status === 'running') {
-        statusEl.textContent = '轉檔中…';
+        statusEl.textContent = jobStage(d);
       } else if (d.status === 'done') {
         clearInterval(pollTimers[jobId]);
         statusEl.textContent = `完成 · ${d.language} · ${d.duration.toFixed(1)}s`;
         resultEl.value = d.text;
       } else if (d.status === 'error') {
         clearInterval(pollTimers[jobId]);
-        statusEl.textContent = '失敗: ' + d.error;
+        statusEl.textContent = '失敗: ' + d.error + ' · ' + (d.retry_hint || '');
       }
     } catch (e) {
       statusEl.textContent = '查詢失敗: ' + e.message;
@@ -476,6 +476,11 @@ function stopJobsPanel() {
   if (jobsTimer) { clearInterval(jobsTimer); jobsTimer = null; }
 }
 
+function jobStage(job) {
+  const names = {queued:'排隊中',starting:'準備中',downloading:'下載中',validating:'音訊驗證中',transcribing:'轉錄中',saving:'儲存中',done:'完成'};
+  return (names[job.stage] || job.stage || job.status) + (job.progress == null ? '…' : ' ' + job.progress + '%');
+}
+
 async function renderJobs() {
   const box = document.getElementById('jobsList');
   try {
@@ -497,7 +502,7 @@ async function renderJobs() {
 
       const badge = document.createElement('span');
       badge.className = 'badge ' + j.status;
-      badge.textContent = j.status;
+      badge.textContent = j.status === "running" ? jobStage(j) : j.status;
 
       const titleEl = document.createElement('span');
       titleEl.className = 'job-title';
@@ -543,7 +548,7 @@ async function renderJobs() {
         actions.appendChild(retryBtn);
         const errEl = document.createElement('span');
         errEl.className = 'job-error';
-        errEl.textContent = j.error || '';
+        errEl.textContent = (j.error || '') + ' · ' + (j.retry_hint || '');
         row.appendChild(badge);
         row.appendChild(titleEl);
         row.appendChild(metaEl);

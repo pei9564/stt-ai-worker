@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
+
+from app.services.errors import describe_error
 
 from app.domain.job import JobStatus
 from app.services.job_service import JobService
@@ -71,7 +74,13 @@ class TranscriptionWorker:
         watchdog.daemon = True
         watchdog.start()
         try:
-            result = self._transcription.process(job)
+            last = [None, -10.0, -1]
+            def report(stage, progress=None):
+                now = time.monotonic()
+                if stage != last[0] or progress is not None and (now - last[1] >= 5 or progress - last[2] >= 5):
+                    self._jobs.update_progress(job_id, stage, progress)
+                    last[:] = [stage, now, progress or 0]
+            result = self._transcription.process(job, on_stage=report)
             if self._timed_out.is_set():
                 return
             watchdog.cancel()
@@ -83,7 +92,8 @@ class TranscriptionWorker:
                 except OSError:
                     log.exception("job %s 音檔清理失敗", job_id)
         except Exception as e:
-            self._jobs.mark_error(job_id, str(e))
+            code, message, hint = describe_error(e)
+            self._jobs.mark_error(job_id, message, code=code, hint=hint)
             log.error("job %s 失敗: %s", job_id, e)
 
         finally:

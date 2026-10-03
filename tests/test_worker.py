@@ -39,7 +39,9 @@ def test_process_marks_job_error_on_failure():
 
     failed = job_service.get(job.id)
     assert failed.status == JobStatus.ERROR
-    assert "boom" in failed.error
+    assert failed.details["error_code"] == "processing_failed"
+    assert failed.details["retry_hint"]
+    assert "boom" not in failed.error
 
 
 def test_process_unknown_job_is_noop():
@@ -91,3 +93,12 @@ def test_shutdown_does_not_start_remaining_jobs():
     assert not worker.is_alive
     assert svc.get(first.id).status == JobStatus.DONE
     assert svc.get(second.id).status == JobStatus.QUEUED
+
+
+def test_finished_job_reports_complete_stage():
+    jobs, worker = _build()
+    job = jobs.create(job_type=JobType.FILE, source=FakeAudioSource(), topic='t', language=None, batch_size=1)
+    worker._process(job.id)
+    loaded = jobs.get(job.id)
+    assert loaded.details['stage'] == 'done'
+    assert loaded.details['progress'] == 100
