@@ -586,6 +586,88 @@
           width: 100%;
         }
       }
+      .reader-controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin: 16px 0;
+      }
+      .reader-controls input {
+        flex: 1;
+        min-width: 140px;
+      }
+      .reader-controls button {
+        font-size: 12px;
+      }
+      .reader-controls button[aria-pressed="true"] {
+        background: var(--soft);
+        border-color: var(--accent);
+      }
+      .segment-list {
+        max-height: 560px;
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 0 16px;
+      }
+      .segment {
+        padding: 16px 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .segment:last-child {
+        border: 0;
+      }
+      .segment-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .segment-time {
+        font-variant-numeric: tabular-nums;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .segment p {
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+        margin: 0;
+        line-height: 1.9;
+      }
+      mark {
+        background: #ffe7a3;
+        color: var(--ink);
+      }
+      .upload-info {
+        margin-top: 12px;
+        padding: 12px;
+        background: var(--bg);
+        border-radius: 10px;
+        font-size: 13px;
+      }
+      .upload-info button {
+        margin-top: 10px;
+      }
+      dialog {
+        width: min(560px, 90vw);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        color: var(--ink);
+        padding: 22px;
+      }
+      dialog::backdrop {
+        background: #172d2466;
+      }
+      dialog textarea {
+        min-height: 160px;
+        margin: 12px 0;
+      }
+      .reader-note {
+        font-size: 12px;
+        color: var(--muted);
+      }
     </style>
   </head>
   <body>
@@ -748,6 +830,16 @@
             <button class="primary submit" type="submit" id="submit-file">
               上傳並轉成文字
             </button>
+            <div id="uploadInfo" class="upload-info" hidden>
+              <span id="uploadStatus" role="status"></span
+              ><progress
+                id="uploadProgress"
+                max="100"
+                value="0"
+                aria-label="檔案上傳進度"
+              ></progress
+              ><button id="cancelUpload" type="button">取消上傳</button>
+            </div>
             <div class="feedback" id="message-file" role="status"></div>
           </form>
           <form
@@ -862,6 +954,33 @@
               ><a id="exportSrt">SRT 字幕</a><a id="exportMarkdown">Markdown</a
               ><a id="exportJson">JSON</a>
             </div>
+            <div
+              class="reader-controls"
+              role="group"
+              aria-label="逐字稿閱讀模式"
+            >
+              <button id="timelineMode" aria-pressed="true">時間軸</button
+              ><button id="textMode" aria-pressed="false">純文字</button>
+            </div>
+            <div class="reader-controls">
+              <input
+                type="search"
+                id="transcriptSearch"
+                aria-label="搜尋逐字稿"
+                placeholder="搜尋逐字稿內容…"
+              /><button id="clearTranscriptSearch">清除搜尋</button
+              ><button id="previousMatch" aria-label="上一個符合結果">
+                上一個</button
+              ><button id="nextMatch" aria-label="下一個符合結果">
+                下一個
+              </button>
+            </div>
+            <p id="searchSummary" class="reader-note" role="status"></p>
+            <div
+              id="segments"
+              class="segment-list"
+              aria-label="時間軸段落"
+            ></div>
             <textarea id="result" readonly aria-label="逐字稿內容"></textarea>
             <p class="meta" id="resultMeta"></p>
           </div>
@@ -870,10 +989,22 @@
       <details class="service">
         <summary>服務狀態與模型資訊</summary>
         <p>faster-whisper __MODEL__ · __DEVICE__ · 預設批次 __BATCH__</p>
+        <button id="enableNotifications" type="button">開啟完成通知</button>
+        <p id="notificationStatus" role="status"></p>
         <div id="gpu" class="gpubar">讀取服務狀態中…</div>
       </details>
     </div>
     <div class="toast" id="toast" role="status"></div>
+    <dialog id="copyDialog" aria-labelledby="copyTitle">
+      <h2 id="copyTitle">複製這個段落</h2>
+      <p class="hint">請按 Ctrl+C（Mac：⌘C）複製已選取的文字。</p>
+      <textarea
+        id="copySegmentText"
+        readonly
+        aria-label="待複製段落"
+      ></textarea>
+      <form method="dialog"><button>關閉</button></form>
+    </dialog>
     <script>
       const $ = (id) => document.getElementById(id);
       const statusEl = $("status"),
@@ -886,6 +1017,14 @@
         jobsLoading = false,
         jobsSignature = "",
         toastTimer;
+      let currentTab = "url",
+        readingMode = "timeline",
+        segments = [],
+        matchIndex = 0,
+        uploadRequest = null,
+        notificationsEnabled = false;
+      const stateKey = "voice-notes.workspace.v1",
+        baseTitle = document.title;
       const labels = {
         queued: "排隊中",
         running: "轉錄中",
@@ -898,6 +1037,8 @@
         toastTimer = setTimeout(() => ($("toast").textContent = ""), 4500);
       }
       function switchTab(key, focus = false) {
+        currentTab = key;
+        saveWorkspace();
         document.querySelectorAll(".tab").forEach((t) => {
           const selected = t.dataset.tab === key;
           t.classList.toggle("active", selected);
@@ -941,13 +1082,15 @@
         }
         if (!r.ok) {
           const detail = d.detail;
-          throw new Error(
+          const error = new Error(
             typeof detail === "string"
               ? detail
               : Array.isArray(detail)
                 ? detail.map((x) => x.msg).join("；")
                 : `請求失敗（${r.status}），請稍後重試。`,
           );
+          error.status = r.status;
+          throw error;
         }
         return d;
       }
@@ -984,6 +1127,7 @@
       );
       dropzone.addEventListener("drop", (e) => {
         e.preventDefault();
+        if (uploadRequest) return;
         if (e.dataTransfer.files.length !== 1) {
           formError("file", "一次請選擇一個音訊檔案。", "file");
           return;
@@ -1045,10 +1189,10 @@
         $("message-" + key).textContent =
           key === "file" ? "正在上傳，完成前請保持此頁開啟。" : "正在建立任務…";
         try {
-          const d = await api("/transcribe_" + key, {
-            method: "POST",
-            body: fd,
-          });
+          const d =
+            key === "file"
+              ? await uploadFile(fd)
+              : await api("/transcribe_" + key, { method: "POST", body: fd });
           $("message-" + key).textContent =
             "任務已建立，可在「任務」查看進度。";
           if (key === "feed") {
@@ -1096,6 +1240,8 @@
         $("resultEmpty").hidden = true;
         $("resultContent").hidden = false;
         resultEl.value = d.text || "";
+        segments = parseSrt(d.srt);
+        renderTranscript();
         $("resultMeta").textContent =
           `${(d.text || "").length.toLocaleString()} 字元 · 原始逐字稿 · SRT 下載包含時間軸`;
         for (const [el, format] of [
@@ -1110,6 +1256,11 @@
         clearTimeout(pollTimer);
         const version = ++pollVersion;
         activeJob = id;
+        saveWorkspace();
+        document.title = "處理中 · Voice Notes";
+        $("transcriptSearch").value = "";
+        matchIndex = 0;
+        segments = [];
         $("resumePoll").hidden = true;
         $("resultContent").hidden = true;
         $("resultEmpty").hidden = false;
@@ -1120,6 +1271,7 @@
         $("progress").removeAttribute("value");
         resultEl.value = "";
         drawJobs(true);
+        let seenPending = false;
         const tick = async () => {
           try {
             const d = await api("/job/" + encodeURIComponent(id));
@@ -1128,9 +1280,12 @@
             $("resultBadge").textContent = labels[d.status] || "處理中";
             if (d.status === "done") {
               showResult(d, id);
+              document.title = "✓ 轉錄完成 · Voice Notes";
+              if (seenPending) notifyFinished(d);
               return;
             }
             if (d.status === "error") {
+              document.title = "轉錄未完成 · Voice Notes";
               statusEl.textContent =
                 "任務處理失敗：" +
                 (d.error || "未知錯誤") +
@@ -1139,6 +1294,7 @@
               $("progress").hidden = true;
               return;
             }
+            seenPending = true;
             statusEl.textContent =
               d.status === "queued"
                 ? "排隊中，輪到這個任務後會自動開始。"
@@ -1148,6 +1304,16 @@
             pollTimer = setTimeout(tick, 3000);
           } catch (e) {
             if (version !== pollVersion) return;
+            if (e.status === 404) {
+              activeJob = null;
+              saveWorkspace();
+              statusEl.textContent =
+                "這個任務已不存在，請從「任務」選擇其他項目。";
+              $("progress").hidden = true;
+              $("resultBadge").textContent = "找不到任務";
+              document.title = baseTitle;
+              return;
+            }
             statusEl.textContent = "查詢失敗：" + e.message;
             $("progress").hidden = true;
             $("resumePoll").hidden = false;
@@ -1169,6 +1335,9 @@
           await navigator.clipboard.writeText(resultEl.value);
           toast("已複製全文");
         } catch {
+          readingMode = "text";
+          saveWorkspace();
+          renderTranscript();
           resultEl.focus();
           resultEl.select();
           toast("請按 Ctrl+C（Mac：⌘C）複製已選取的文字。");
@@ -1331,6 +1500,8 @@
                     clearTimeout(pollTimer);
                     ++pollVersion;
                     activeJob = null;
+                    saveWorkspace();
+                    document.title = baseTitle;
                     $("resultContent").hidden = true;
                     $("resultEmpty").hidden = false;
                     $("progress").hidden = true;
@@ -1371,8 +1542,14 @@
           jobsLoading = false;
         }
       }
-      $("jobSearch").oninput = () => drawJobs();
-      $("jobFilter").onchange = () => drawJobs();
+      $("jobSearch").oninput = () => {
+        saveWorkspace();
+        drawJobs();
+      };
+      $("jobFilter").onchange = () => {
+        saveWorkspace();
+        drawJobs();
+      };
       $("refreshJobs").onclick = () => renderJobs();
       async function cancelAll() {
         if (!confirm("確定取消所有排隊中的任務？正在轉錄的任務會繼續。"))
@@ -1409,6 +1586,334 @@
           gpuTimer = setInterval(pollGpu, 5000);
         }
       });
+      function saveWorkspace() {
+        try {
+          localStorage.setItem(
+            stateKey,
+            JSON.stringify({
+              tab: currentTab,
+              job: activeJob,
+              query: $("jobSearch").value,
+              filter: $("jobFilter").value,
+              mode: readingMode,
+              notifications: notificationsEnabled,
+            }),
+          );
+        } catch {
+          /* Storage may be disabled; the workspace still works. */
+        }
+      }
+      function parseSrt(srt) {
+        if (typeof srt !== "string") return [];
+        return srt
+          .replace(/\r/g, "")
+          .trim()
+          .split(/\n\s*\n/)
+          .flatMap((block) => {
+            const lines = block.split("\n");
+            const index = lines.findIndex((line) =>
+              /^\d{2,}:\d{2}:\d{2}[,.]\d{3}\s+-->\s+\d{2,}:\d{2}:\d{2}[,.]\d{3}/.test(
+                line,
+              ),
+            );
+            if (index < 0 || index === lines.length - 1) return [];
+            return [
+              {
+                time: lines[index].replaceAll(",", "."),
+                text: lines.slice(index + 1).join("\n"),
+              },
+            ];
+          });
+      }
+      function highlighted(text, query) {
+        const fragment = document.createDocumentFragment();
+        let cursor = 0;
+        const lower = text.toLowerCase(),
+          needle = query.toLowerCase();
+        while (needle) {
+          const i = lower.indexOf(needle, cursor);
+          if (i < 0) break;
+          fragment.append(
+            document.createTextNode(text.slice(cursor, i)),
+            el("mark", "", text.slice(i, i + query.length)),
+          );
+          cursor = i + query.length;
+        }
+        fragment.append(document.createTextNode(text.slice(cursor)));
+        return fragment;
+      }
+      function textMatches(query) {
+        const matches = [],
+          text = resultEl.value.toLowerCase(),
+          needle = query.toLowerCase();
+        if (!needle) return matches;
+        let i = 0;
+        while ((i = text.indexOf(needle, i)) !== -1) {
+          matches.push(i);
+          i += needle.length;
+        }
+        return matches;
+      }
+      function renderTranscript() {
+        const timeline = readingMode === "timeline" && segments.length > 0,
+          query = $("transcriptSearch").value.trim();
+        $("timelineMode").disabled = !segments.length;
+        $("timelineMode").setAttribute("aria-pressed", String(timeline));
+        $("textMode").setAttribute("aria-pressed", String(!timeline));
+        $("segments").hidden = !timeline;
+        resultEl.hidden = timeline;
+        $("segments").replaceChildren();
+        $("previousMatch").hidden = timeline;
+        $("nextMatch").hidden = timeline;
+        if (timeline) {
+          const visible = segments.filter((s) =>
+            s.text.toLowerCase().includes(query.toLowerCase()),
+          );
+          $("searchSummary").textContent = query
+            ? `${visible.length} / ${segments.length} 段符合搜尋`
+            : `共 ${segments.length} 個時間軸段落`;
+          if (!visible.length)
+            $("segments").appendChild(
+              el(
+                "p",
+                "jobs-empty",
+                "找不到符合的段落，請換個關鍵字或清除搜尋。",
+              ),
+            );
+          visible.forEach((s) => {
+            const row = el("article", "segment"),
+              head = el("div", "segment-head"),
+              copy = el("button", "btn-sm", "複製這段");
+            copy.onclick = async () => {
+              try {
+                await navigator.clipboard.writeText(s.text);
+                toast("已複製段落");
+              } catch {
+                $("copySegmentText").value = s.text;
+                $("copyDialog").showModal();
+                $("copySegmentText").focus();
+                $("copySegmentText").select();
+              }
+            };
+            head.append(el("span", "segment-time", s.time), copy);
+            const text = el("p");
+            text.append(highlighted(s.text, query));
+            row.append(head, text);
+            $("segments").appendChild(row);
+          });
+        } else {
+          const matches = textMatches(query);
+          matchIndex = matches.length
+            ? ((matchIndex % matches.length) + matches.length) % matches.length
+            : 0;
+          $("previousMatch").disabled = !matches.length;
+          $("nextMatch").disabled = !matches.length;
+          $("searchSummary").textContent =
+            (segments.length
+              ? ""
+              : "這份逐字稿沒有可用的時間軸，已顯示純文字。 ") +
+            (query
+              ? matches.length
+                ? `第 ${matchIndex + 1} / ${matches.length} 個符合結果`
+                : "找不到符合的文字。"
+              : "");
+          if (matches.length)
+            resultEl.setSelectionRange(
+              matches[matchIndex],
+              matches[matchIndex] + query.length,
+            );
+          else resultEl.setSelectionRange(0, 0);
+        }
+      }
+      $("timelineMode").onclick = () => {
+        readingMode = "timeline";
+        matchIndex = 0;
+        saveWorkspace();
+        renderTranscript();
+      };
+      $("textMode").onclick = () => {
+        readingMode = "text";
+        matchIndex = 0;
+        saveWorkspace();
+        renderTranscript();
+      };
+      $("transcriptSearch").oninput = () => {
+        matchIndex = 0;
+        renderTranscript();
+      };
+      $("clearTranscriptSearch").onclick = () => {
+        $("transcriptSearch").value = "";
+        matchIndex = 0;
+        renderTranscript();
+        $("transcriptSearch").focus();
+      };
+      $("previousMatch").onclick = () => {
+        matchIndex--;
+        renderTranscript();
+        resultEl.focus();
+      };
+      $("nextMatch").onclick = () => {
+        matchIndex++;
+        renderTranscript();
+        resultEl.focus();
+      };
+      function uploadFile(fd) {
+        return new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          uploadRequest = xhr;
+          $("file").disabled = true;
+          $("uploadInfo").hidden = false;
+          $("uploadProgress").value = 0;
+          $("uploadStatus").textContent = "準備上傳…";
+          $("cancelUpload").disabled = false;
+          function cleanup() {
+            if (uploadRequest === xhr) uploadRequest = null;
+            $("file").disabled = false;
+            $("cancelUpload").disabled = true;
+          }
+          xhr.open("POST", "/transcribe_file");
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+              const percent = Math.round((e.loaded / e.total) * 100);
+              $("uploadProgress").value = percent;
+              $("uploadStatus").textContent =
+                `${percent}% · 已傳送 ${(e.loaded / 1048576).toFixed(1)} / ${(e.total / 1048576).toFixed(1)} MB`;
+            } else {
+              $("uploadProgress").removeAttribute("value");
+              $("uploadStatus").textContent =
+                `已傳送 ${(e.loaded / 1048576).toFixed(1)} MB`;
+            }
+          };
+          xhr.upload.onload = () => {
+            $("uploadProgress").value = 100;
+            $("uploadStatus").textContent =
+              "100% · 上傳完成，等待服務建立任務…";
+            $("cancelUpload").disabled = true;
+          };
+          xhr.onload = () => {
+            cleanup();
+            let data;
+            try {
+              data = JSON.parse(xhr.responseText);
+            } catch {
+              reject(new Error("服務回應異常，請先到「任務」確認是否已建立。"));
+              return;
+            }
+            if (xhr.status < 200 || xhr.status >= 300) {
+              $("uploadStatus").textContent = "服務未接受上傳";
+              reject(
+                new Error(
+                  typeof data.detail === "string"
+                    ? data.detail
+                    : "上傳失敗，請檢查檔案後重試。",
+                ),
+              );
+              return;
+            }
+            $("uploadStatus").textContent = "100% · 上傳完成，任務已建立";
+            resolve(data);
+          };
+          xhr.onerror = () => {
+            cleanup();
+            $("uploadStatus").textContent = "上傳連線中斷";
+            reject(
+              new Error(
+                "上傳連線中斷，請先到「任務」確認是否已建立，再重新上傳。",
+              ),
+            );
+          };
+          xhr.onabort = () => {
+            cleanup();
+            $("uploadStatus").textContent = "已停止上傳";
+            reject(
+              new Error(
+                "已停止上傳。若音檔已送達服務，請到「任務」確認是否已建立。",
+              ),
+            );
+          };
+          xhr.send(fd);
+        });
+      }
+      $("cancelUpload").onclick = () => uploadRequest?.abort();
+      window.addEventListener("beforeunload", (e) => {
+        if (uploadRequest) {
+          e.preventDefault();
+          e.returnValue = "";
+        }
+      });
+      function updateNotificationControl() {
+        const supported = "Notification" in window && window.isSecureContext;
+        $("enableNotifications").disabled = !supported;
+        $("enableNotifications").textContent = notificationsEnabled
+          ? "關閉完成通知"
+          : "開啟完成通知";
+        $("notificationStatus").textContent = !supported
+          ? "此連線不支援桌面通知；可使用 localhost 或 HTTPS。分頁標題仍會顯示完成狀態。"
+          : Notification.permission === "denied"
+            ? "通知已被瀏覽器封鎖，可在網站設定調整。"
+            : notificationsEnabled
+              ? "保持頁面開啟，正在查看的任務完成時會通知你。"
+              : "通知預設關閉，點擊按鈕才會要求權限。";
+      }
+      $("enableNotifications").onclick = async () => {
+        try {
+          notificationsEnabled = notificationsEnabled
+            ? false
+            : (await Notification.requestPermission()) === "granted";
+          saveWorkspace();
+          updateNotificationControl();
+        } catch {
+          toast("目前無法啟用通知，請檢查瀏覽器設定。");
+        }
+      };
+      function notifyFinished(d) {
+        if (
+          !notificationsEnabled ||
+          !("Notification" in window) ||
+          Notification.permission !== "granted"
+        )
+          return;
+        try {
+          const notification = new Notification("逐字稿已完成", {
+            body: d.topic || "回到 Voice Notes 查看結果。",
+            tag: "voice-notes-" + d.id,
+          });
+          notification.onclick = () => {
+            window.focus();
+            notification.close();
+          };
+        } catch {
+          /* Some mobile browsers require a service worker; the title still updates. */
+        }
+      }
+      function restoreWorkspace() {
+        let state = {};
+        try {
+          const value = JSON.parse(localStorage.getItem(stateKey) || "{}");
+          if (value && typeof value === "object") state = value;
+        } catch {}
+        if (["url", "file", "feed", "jobs"].includes(state.tab))
+          currentTab = state.tab;
+        if (typeof state.query === "string")
+          $("jobSearch").value = state.query.slice(0, 500);
+        if (["all", "active", "done", "error"].includes(state.filter))
+          $("jobFilter").value = state.filter;
+        if (["timeline", "text"].includes(state.mode)) readingMode = state.mode;
+        notificationsEnabled =
+          state.notifications === true &&
+          "Notification" in window &&
+          Notification.permission === "granted";
+        if (
+          typeof state.job === "string" &&
+          state.job.length > 0 &&
+          state.job.length < 200
+        )
+          activeJob = state.job;
+        switchTab(currentTab);
+        updateNotificationControl();
+        if (activeJob) pollJob(activeJob);
+      }
+      restoreWorkspace();
     </script>
   </body>
 </html>
