@@ -43,6 +43,8 @@ class JobView(BaseModel):
     srt: str | None = None
     transcript_id: int | None = None
     error: str | None = None
+    favorite: bool = False
+    tags: list[str] = Field(default_factory=list)
     provenance: dict = Field(default_factory=dict)
     stage: str = 'queued'
     progress: int | None = None
@@ -104,6 +106,8 @@ def to_job_view(job: Job, *, include_text: bool) -> JobView:
                     'model_config': job.details.get('model_config'),
                     'requested_language': job.language, 'batch_size': job.batch_size,
                     'input_truncated': False},
+        favorite=bool(job.details.get("library", {}).get("favorite", False)),
+        tags=job.details.get("library", {}).get("tags", []),
         id=job.id,
         type=job.type.value,
         status=job.status.value,

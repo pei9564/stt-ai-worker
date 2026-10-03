@@ -82,6 +82,7 @@ class PostgresJobRepository:
             )
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (id) DO UPDATE SET
+                topic         = EXCLUDED.topic,
                 status        = EXCLUDED.status,
                 started_at    = EXCLUDED.started_at,
                 finished_at   = EXCLUDED.finished_at,

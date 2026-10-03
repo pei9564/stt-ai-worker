@@ -158,3 +158,12 @@ K3s Service 已加 scrape annotations；要保存歷史圖表仍需自行接 Pro
 使用與 Finance Brief 相同的 LLM 設定：`VLLM_BASE_URL`、`VLLM_MODEL`、`VLLM_API_KEY`，請求逾時由 `LLM_TIMEOUT_SECONDS` 控制（預設 120 秒）。只有主動產生整理才會送出逐字稿；AI 結果請對照原文。
 
 頂部「開啟 Finance Brief」預設使用目前瀏覽器主機名稱與 `SCRAPER_PUBLIC_PORT`（8080）。不同網域或反向代理路徑請設定 `SCRAPER_PUBLIC_URL` 為瀏覽器可開啟的完整 URL。`/?job=<任務 ID>` 可直達指定逐字稿，優先於瀏覽器記住的任務。
+
+#### 原文引用、修正版與歷史資料庫
+
+- 新產生的 AI 整理會要求附上 `[S1]` 等原文編號，介面只把能對應到實際來源的編號變成按鈕。點時間戳會定位到逐字稿段落；沒有 SRT 的舊逐字稿則定位純文字。引用只協助核對，不代表模型的解讀已被自動驗證；沒有引用的結果會清楚提示。
+- 「編輯我的版本」另存你的文字，不覆蓋 AI 原版。可切換目前修正版、目前 AI 原版、最初 AI 原版及最近 10 個舊版，下載目前選取版本的 Markdown／JSON。
+- 「整理偏好」最多 1,000 字，例如「只整理投資相關內容」；按「重新產生」才會套用。生成中／失敗時保留上一版與修正版，成功後才切換新版。編輯時若另一頁已重新產生，會拒絕覆蓋並提示重新載入。
+- 「任務」切換「全部歷史」可搜尋所有保存的標題、逐字稿與標籤（每頁 50 筆），不受 `JOBS_WINDOW_HOURS` 限制。任務可收藏、重新命名與編輯最多 20 個標籤；收藏／標籤篩選會查全部歷史。
+
+新增 API：`GET /library?q=...&tag=...&favorite=true&status=done&page=1`、`PATCH /job/{id}/library`、`PATCH /job/{id}/notes/{mode}`。產生整理接受 `{"regenerate":true,"instruction":"..."}`；整理匯出可指定 `version=current|ai|original|version:0`。原始逐字稿與 SRT 匯出不會因上述操作而改變。

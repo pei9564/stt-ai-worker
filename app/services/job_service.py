@@ -15,6 +15,7 @@ from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import queue
 import threading
 import uuid
+import copy
 
 from app.domain.audio_source import AudioSource
 from app.observability import request_id_var
@@ -182,6 +183,42 @@ class JobService:
                 return
             mutate(job)
             self._repo.save(job)
+
+    def library(self, *, query='', tag='', favorite=False, status='all', page=1, limit=50):
+        with self._lock:
+            rows = self._repo.all()
+            query = query.casefold().strip()
+            def matches(job):
+                meta = job.details.get('library', {})
+                searchable = (job.topic or '') + ' ' + ' '.join(meta.get('tags', [])) + ' ' + (job.result.text if job.result else '')
+                return (status=='all' or (job.status.value in ('queued','running') if status=='active' else job.status.value==status)) and (not query or query in searchable.casefold()) and (not favorite or meta.get('favorite')) and (not tag or tag in meta.get('tags', []))
+            found = sorted((j for j in rows if matches(j)), key=lambda j:j.created_at, reverse=True)
+            return found[(page-1)*limit:page*limit], len(found)
+
+    def update_library(self, job_id, fields):
+        with self._lock:
+            job = self._repo.get(job_id)
+            if not job:
+                raise KeyError(job_id)
+            if 'topic' in fields:
+                job.topic = fields.pop('topic')
+            job.details.setdefault('library', {}).update(fields)
+            self._repo.save(job)
+            return job
+
+    def edit_note(self, job_id, mode, text, expected):
+        with self._lock:
+            job = self._repo.get(job_id)
+            if not job:
+                raise KeyError(job_id)
+            note = job.details.get('notes', {}).get(mode)
+            if not note or not note.get('text') or note.get('status') == 'running' or note.get('generated_at') != expected:
+                raise ValueError('整理已更新或正在產生，請重新載入後編輯。')
+            note = copy.deepcopy(note)
+            note.update(edited_text=text, edited_at=datetime.datetime.now(datetime.timezone.utc).isoformat())
+            job.details['notes'][mode] = note
+            self._repo.save(job)
+            return note
 
     def update_note(self, job_id, mode, state):
         def mutate(job):

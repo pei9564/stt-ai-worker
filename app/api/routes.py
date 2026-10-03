@@ -8,6 +8,8 @@ import json
 import tempfile
 from pathlib import Path
 
+from pydantic import BaseModel, Field
+from fastapi import Query
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
@@ -310,25 +312,89 @@ def get_notes(job_id: str, container: Container = Depends(get_container)):
     return {'enabled': container.notes.client.enabled, 'notes': dict(job.details.get('notes', {}))}
 
 
+class NotesRequest(BaseModel):
+    regenerate: bool = False
+    instruction: str = Field(default='', max_length=1000)
+
+
+class NotesEdit(BaseModel):
+    text: str = Field(max_length=50000)
+    generated_at: str
+
+
+@router.patch('/job/{job_id}/notes/{mode}')
+def edit_notes(job_id: str, mode: str, payload: NotesEdit, container: Container = Depends(get_container)):
+    try:
+        return container.job_service.edit_note(job_id, mode, payload.text, payload.generated_at)
+    except KeyError:
+        raise HTTPException(404, '找不到任務')
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+
+
 @router.post('/job/{job_id}/notes/{mode}', status_code=202)
-def create_notes(job_id: str, mode: str, container: Container = Depends(get_container)):
+def create_notes(job_id: str, mode: str, payload: NotesRequest | None = None, container: Container = Depends(get_container)):
     from app.services.notes import NotesError
     try:
-        return container.notes.start(job_id, mode)
+        return container.notes.start(job_id, mode, **(payload.model_dump() if payload else {}))
     except NotesError as exc:
         raise HTTPException(exc.status, str(exc)) from exc
 
 
 @router.get('/job/{job_id}/notes/{mode}/export')
-def export_notes(job_id: str, mode: str, format: str = 'markdown', container: Container = Depends(get_container)):
+def export_notes(job_id: str, mode: str, format: str = 'markdown', version: str = 'current', container: Container = Depends(get_container)):
     from app.services.notes import MODES
     if mode not in MODES or format not in ('markdown', 'json'):
         raise HTTPException(422, '不支援的格式或整理類型')
     data = get_notes(job_id, container)['notes'].get(mode, {})
-    if data.get('status') != 'done':
+    if not data.get('text'):
         raise HTTPException(409, '尚無完成的整理結果')
-    payload = dict(data, job_id=job_id, mode=mode)
+    if version == 'original':
+        data = data.get('original') or data
+    elif version.startswith('version:'):
+        try:
+            index = int(version.split(':')[1])
+            if index < 0:
+                raise ValueError()
+            data = data.get('versions', [])[index]
+        except (ValueError, IndexError):
+            raise HTTPException(422, '找不到指定版本')
+    elif version not in ('current', 'ai'):
+        raise HTTPException(422, '不支援的版本')
+    payload = dict(data, job_id=job_id, mode=mode, selected_version=version)
+    result_text = data['text'] if version == 'ai' else data.get('edited_text', data['text'])
+    references = '\n'.join(f"- [{r['id']}] {r.get('time') or '原文段落'}：{r['quote']}" for r in data.get('references', []))
     if format == 'json':
         return JSONResponse(payload, headers={'Content-Disposition': f'attachment; filename="{mode}.json"'})
-    body = f"# {MODES[mode]}\n\n{data['text']}\n\n---\nAI 整理，請對照原始逐字稿。\n模型：{data.get('model', '')}\n產生時間：{data.get('generated_at', '')}\n"
+    body = f"# {MODES[mode]}\n\n{result_text}\n\n## 原文來源\n{references}\n\n---\nAI 整理，請對照原始逐字稿。\n模型：{data.get('model', '')}\n產生時間：{data.get('generated_at', '')}\n"
     return Response(body, media_type='text/markdown', headers={'Content-Disposition': f'attachment; filename="{mode}.md"'})
+
+
+class LibraryEdit(BaseModel):
+    topic: str | None = Field(default=None, min_length=1, max_length=200)
+    tags: list[str] | None = Field(default=None, max_length=20)
+    favorite: bool | None = None
+
+
+@router.get('/library')
+def library(q: str = Query(default='', max_length=500), tag: str = Query(default='', max_length=40), favorite: bool = False, status: str = Query(default='all', pattern='^(all|active|done|error)$'),
+            page: int = Query(default=1, ge=1), limit: int = Query(default=50, ge=1, le=100), container: Container = Depends(get_container)):
+    jobs, count = container.job_service.library(query=q, tag=tag, favorite=favorite, status=status, page=page, limit=limit)
+    return {'jobs': [to_job_view(job, include_text=False) for job in jobs], 'total': count, 'page': page, 'limit': limit}
+
+
+@router.patch('/job/{job_id}/library')
+def edit_library(job_id: str, payload: LibraryEdit, container: Container = Depends(get_container)):
+    fields = payload.model_dump(exclude_none=True)
+    if 'topic' in fields:
+        fields['topic'] = fields['topic'].strip()
+        if not fields['topic']:
+            raise HTTPException(422, '標題不可空白')
+    if 'tags' in fields:
+        fields['tags'] = list(dict.fromkeys(t.strip() for t in fields['tags'] if t.strip()))
+        if any(len(t)>40 for t in fields['tags']):
+            raise HTTPException(422, '每個標籤最多 40 字')
+    try:
+        return to_job_view(container.job_service.update_library(job_id, fields), include_text=False)
+    except KeyError:
+        raise HTTPException(404, '找不到任務')

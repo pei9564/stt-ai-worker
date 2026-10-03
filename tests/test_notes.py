@@ -119,3 +119,54 @@ def test_llm_rejects_truncated_results_and_redacts_provider_errors(settings, mon
     with pytest.raises(NotesError) as error:
         client.chat('data', 'summary')
     assert 'secret-provider-details' not in str(error.value)
+
+
+def test_references_versions_edits_and_failed_regeneration(settings):
+    jobs=JobService(InMemoryJobRepository(),jobs_window_hours=48)
+    jid=completed(jobs,'Evidence')
+    jobs.mark_done(jid, JobResult(language='zh',duration=1,text='Evidence',srt='',transcript_id=1))
+    class Cited(Client):
+        def chat(self,text,mode):
+            return '可核對的重點 [S1]，不支援的引用 [S999]'
+    service=NotesService(jobs,settings,Cited())
+    service.start(jid,'summary');finish(service)
+    first=jobs.get(jid).details['notes']['summary']
+    assert first['references'][0]['quote']=='Evidence'
+    assert '[S999]' not in first['text']
+    jobs.edit_note(jid,'summary','我的修正版 [S1]',first['generated_at'])
+    class Fails(Client):
+        def chat(self,text,mode):raise NotesError('temporary')
+    service.client=Fails();service.start(jid,'summary',regenerate=True);finish(service)
+    failed=jobs.get(jid).details['notes']['summary']
+    assert failed['edited_text']=='我的修正版 [S1]' and failed['text']==first['text']
+    service.client=Client();service.start(jid,'summary',regenerate=True,instruction='只保留重點');finish(service)
+    latest=jobs.get(jid).details['notes']['summary']
+    assert latest['original']['text']==first['text']
+    assert latest['versions'][-1]['edited_text']=='我的修正版 [S1]'
+    assert 'edited_text' not in latest
+    assert '只保留重點' in service.client.calls[0]
+    with pytest.raises(ValueError):jobs.edit_note(jid,'summary','stale',first['generated_at'])
+
+
+def test_source_time_is_taken_only_from_real_srt():
+    from app.services.notes import source_text
+    sources, annotated=source_text('first\nsecond','1\n00:00:01,250 --> 00:00:03,000\nfirst\n\n2\n00:00:03,000 --> 00:00:04,000\nsecond')
+    assert sources[1]['index']==1
+    assert sources[1]['time']=='00:00:03,000 --> 00:00:04,000'
+    assert '[S2] second' in annotated
+    untimed,_=source_text('text','invalid srt')
+    assert untimed[0]['time'] is None
+
+
+def test_library_searches_old_transcripts_tags_and_favorites(settings):
+    from datetime import datetime,timezone,timedelta
+    repo=InMemoryJobRepository();jobs=JobService(repo,jobs_window_hours=48)
+    jid=completed(jobs,'hidden-search-term')
+    old=repo.get(jid);old.created_at=datetime.now(timezone.utc)-timedelta(days=100);repo.save(old)
+    jobs.update_library(jid,{'topic':'renamed','tags':['research'],'favorite':True})
+    assert not jobs.list_recent()
+    rows,count=jobs.library(query='hidden-search-term',favorite=True,tag='research',status='done')
+    assert count==1 and rows[0].topic=='renamed'
+    assert jobs.library(tag='other')[1]==0
+    assert jobs.library(status='error')[1]==0
+    assert jobs.library(page=2,limit=1)[0]==[]

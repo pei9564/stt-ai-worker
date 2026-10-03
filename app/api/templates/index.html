@@ -695,6 +695,30 @@
           flex-wrap: wrap;
         }
       }
+      .source-highlight {
+        background: #fff1c5;
+      }
+      .source-link {
+        margin: 0 3px;
+        color: var(--accent);
+      }
+      .source-link:focus {
+        outline: 2px solid var(--accent);
+      }
+      .reader-controls .favorite-filter {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin: 0;
+        white-space: nowrap;
+      }
+      .reader-controls .favorite-filter input {
+        flex: none;
+        min-width: 0;
+        width: 16px;
+        height: 16px;
+        accent-color: var(--accent);
+      }
     </style>
   </head>
   <body>
@@ -927,6 +951,19 @@
               近 __WINDOW__ 小時的任務，每 5
               秒更新。處理中的任務可在重新整理後繼續查看。
             </p>
+            <div class="reader-controls">
+              <select id="jobScope" aria-label="任務時間範圍">
+                <option value="recent">近期任務</option>
+                <option value="all">全部歷史（搜尋逐字稿）</option></select
+              ><label class="favorite-filter"
+                ><input id="favoriteOnly" type="checkbox" />只看收藏</label
+              ><input
+                id="tagFilter"
+                type="search"
+                aria-label="標籤篩選"
+                placeholder="標籤篩選（完整標籤）"
+              />
+            </div>
             <div class="job-tools">
               <input
                 type="search"
@@ -941,6 +978,11 @@
               </select>
             </div>
             <div id="jobsList" aria-label="任務清單">載入中…</div>
+            <div id="libraryPages" class="toolbar" hidden>
+              <button id="previousJobs">上一頁</button
+              ><span id="libraryCount"></span
+              ><button id="nextJobs">下一頁</button>
+            </div>
             <button id="refreshJobs" type="button">重新整理任務</button>
             <details class="advanced">
               <summary>管理排隊任務</summary>
@@ -1030,6 +1072,24 @@
                 ><button id="refreshNotes">重新載入整理</button>
               </div>
               <p id="notesStatus" role="status" class="hint"></p>
+              <label for="noteInstruction">整理偏好（選填）</label
+              ><input
+                id="noteInstruction"
+                type="text"
+                maxlength="1000"
+                placeholder="例如：只整理投資相關內容"
+              />
+              <div class="toolbar">
+                <button id="regenerateNotes">重新產生</button
+                ><button id="editNotes">編輯我的版本</button>
+              </div>
+              <label for="noteVersion">查看版本</label
+              ><select id="noteVersion">
+                <option value="current">目前版本（含我的修正）</option>
+                <option value="ai">目前 AI 原版</option>
+                <option value="original">最初 AI 原版</option>
+              </select>
+              <p id="noteReferencesHint" class="hint"></p>
               <div id="notesText" class="notes-output"></div>
               <div id="notesDownloads" class="toolbar" hidden>
                 <a id="notesMarkdown">下載整理 Markdown</a
@@ -1057,6 +1117,37 @@
         aria-label="待複製段落"
       ></textarea>
       <form method="dialog"><button>關閉</button></form>
+    </dialog>
+    <dialog id="jobEditDialog" aria-labelledby="jobEditTitle">
+      <h2 id="jobEditTitle">名稱與標籤</h2>
+      <form id="jobEditForm">
+        <label for="jobTitleEdit">任務名稱</label
+        ><input type="text" id="jobTitleEdit" maxlength="200" required /><label
+          for="jobTagsEdit"
+          >標籤（逗號分隔）</label
+        ><input type="text" id="jobTagsEdit" />
+        <p id="jobEditStatus" role="status"></p>
+        <div class="toolbar">
+          <button id="saveJobEdit">儲存任務資訊</button
+          ><button type="button" id="cancelJobEdit">取消</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="notesEditDialog" aria-labelledby="notesEditTitle">
+      <h2 id="notesEditTitle">我的修正版</h2>
+      <p class="hint">AI 原版會保留；請保留適用的 [S1] 等原文引用。</p>
+      <form id="notesEditForm">
+        <textarea
+          id="notesEditText"
+          aria-label="整理修正版"
+          maxlength="50000"
+        ></textarea>
+        <p id="notesEditStatus" role="status"></p>
+        <div class="toolbar">
+          <button id="saveNotesEdit">儲存修正版</button
+          ><button type="button" id="cancelNotesEdit">取消</button>
+        </div>
+      </form>
     </dialog>
     <script>
       const $ = (id) => document.getElementById(id);
@@ -1434,7 +1525,13 @@
       function drawJobs(force = false) {
         const query = $("jobSearch").value.trim().toLowerCase(),
           filter = $("jobFilter").value;
-        const signature = JSON.stringify([jobs, query, filter, activeJob]);
+        const signature = JSON.stringify([
+          jobs,
+          query,
+          filter,
+          activeJob,
+          libraryQuery,
+        ]);
         if (!force && signature === jobsSignature) return;
         jobsSignature = signature;
         const box = $("jobsList");
@@ -1448,7 +1545,9 @@
         );
         const visible = jobs.filter(
           (j) =>
-            (j.topic || j.id).toLowerCase().includes(query) &&
+            (usesLibrary()
+              ? libraryQuery === query
+              : (j.topic || j.id).toLowerCase().includes(query)) &&
             (filter === "all" ||
               (filter === "active"
                 ? ["running", "queued"].includes(j.status)
@@ -1459,7 +1558,7 @@
             el(
               "div",
               "jobs-empty",
-              jobs.length
+              jobs.length || usesLibrary()
                 ? "沒有符合條件的任務。試試其他關鍵字或狀態。"
                 : "還沒有任務。貼上連結或上傳音檔，建立第一份逐字稿。",
             ),
@@ -1507,6 +1606,20 @@
             ),
           );
           const actions = el("div", "job-actions");
+          actions.appendChild(
+            action(j.favorite ? "取消收藏" : "收藏任務", () =>
+              api("/job/" + encodeURIComponent(j.id) + "/library", {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ favorite: !j.favorite }),
+              }),
+            ),
+          );
+          actions.appendChild(action("名稱與標籤", () => editJob(j)));
+          if ((j.tags || []).length)
+            row.appendChild(
+              el("p", "hint", j.tags.map((t) => "#" + t).join(" ")),
+            );
           if (j.status === "done") {
             actions.appendChild(
               action("閱讀逐字稿", () => viewJobResult(j.id)),
@@ -1585,27 +1698,48 @@
         });
       }
       async function renderJobs() {
-        if (jobsLoading) return;
-        jobsLoading = true;
+        $("jobSearch").placeholder = usesLibrary()
+          ? "搜尋標題、逐字稿或標籤…"
+          : "搜尋標題…";
+        const version = ++jobsQueryVersion,
+          query = $("jobSearch").value.trim().toLowerCase();
         try {
-          const d = await api("/jobs");
+          const params = new URLSearchParams({
+            q: query,
+            tag: $("tagFilter").value.trim(),
+            favorite: String($("favoriteOnly").checked),
+            status: $("jobFilter").value,
+            page: String(libraryPage),
+          });
+          const d = await api(usesLibrary() ? "/library?" + params : "/jobs");
+          if (version !== jobsQueryVersion) return;
           jobs = d.jobs;
+          libraryQuery = query;
+          libraryTotal = d.total || 0;
+          $("libraryPages").hidden = !usesLibrary();
+          $("libraryCount").textContent =
+            `第 ${libraryPage} 頁 · 共 ${libraryTotal} 筆`;
+          $("previousJobs").disabled = libraryPage <= 1;
+          $("nextJobs").disabled = libraryPage * 50 >= libraryTotal;
           drawJobs();
         } catch (e) {
+          if (version !== jobsQueryVersion) return;
           jobsSignature = "";
           $("jobsList").textContent =
             "載入失敗：" + e.message + " 點「重新整理任務」再試一次。";
-        } finally {
-          jobsLoading = false;
         }
       }
       $("jobSearch").oninput = () => {
         saveWorkspace();
-        drawJobs();
+        if (usesLibrary()) {
+          clearTimeout(libraryTimer);
+          libraryTimer = setTimeout(changeLibrary, 250);
+        } else drawJobs();
       };
       $("jobFilter").onchange = () => {
         saveWorkspace();
-        drawJobs();
+        if (usesLibrary()) changeLibrary();
+        else drawJobs();
       };
       $("refreshJobs").onclick = () => renderJobs();
       async function cancelAll() {
@@ -1660,6 +1794,9 @@
               query: $("jobSearch").value,
               filter: $("jobFilter").value,
               mode: readingMode,
+              scope: $("jobScope").value,
+              favorite: $("favoriteOnly").checked,
+              tag: $("tagFilter").value,
               notifications: notificationsEnabled,
             }),
           );
@@ -1962,6 +2099,10 @@
           $("jobSearch").value = state.query.slice(0, 500);
         if (["all", "active", "done", "error"].includes(state.filter))
           $("jobFilter").value = state.filter;
+        if (["recent", "all"].includes(state.scope))
+          $("jobScope").value = state.scope;
+        $("favoriteOnly").checked = state.favorite === true;
+        if (typeof state.tag === "string") $("tagFilter").value = state.tag;
         if (["timeline", "text"].includes(state.mode)) readingMode = state.mode;
         notificationsEnabled =
           state.notifications === true &&
@@ -2030,8 +2171,31 @@
       }
       function renderNotes() {
         const note = notesData[notesMode] || {};
-        $("notesText").textContent = note.text || "";
-        $("notesDownloads").hidden = note.status !== "done";
+        const view = $("noteVersion");
+        view.replaceChildren();
+        for (const [value, label] of [
+          ["current", "目前版本（含我的修正）"],
+          ["ai", "目前 AI 原版"],
+          ["original", "最初 AI 原版"],
+          ...(note.versions || []).map((v, i) => [
+            "version:" + i,
+            "舊版 " +
+              (i + 1) +
+              " · " +
+              new Date(v.generated_at).toLocaleString("zh-TW"),
+          ]),
+        ]) {
+          const option = el("option", "", label);
+          option.value = value;
+          view.appendChild(option);
+        }
+        view.value = noteView;
+        if (!view.value) {
+          noteView = "current";
+          view.value = "current";
+        }
+        renderNoteContent();
+        $("notesDownloads").hidden = !note.text;
         $("notesStatus").textContent =
           note.status === "running"
             ? `${note.stage} · 已整理 ${note.completed || 0} / ${note.chunks || 0} 段`
@@ -2040,6 +2204,10 @@
               : note.status === "done"
                 ? `${noteLabels[notesMode]} · ${note.model || "AI"} · ${new Date(note.generated_at).toLocaleString("zh-TW")}`
                 : "選擇整理方式，再按「產生整理」。";
+        if (note.text && note.status === "running")
+          $("notesStatus").textContent += "（以下保留上一版）";
+        if (note.text && note.status === "error")
+          $("notesStatus").textContent += "（上一版與修正版仍保留）";
         $("generateNotes").textContent =
           note.status === "error"
             ? "重試整理"
@@ -2060,7 +2228,9 @@
             "/notes/" +
             notesMode +
             "/export?format=" +
-            format;
+            format +
+            "&version=" +
+            encodeURIComponent(noteView);
       }
       $("notesMode").onchange = () => {
         notesMode = $("notesMode").value;
@@ -2068,24 +2238,7 @@
         renderNotes();
       };
       $("refreshNotes").onclick = () => activeJob && loadNotes(activeJob);
-      $("generateNotes").onclick = async () => {
-        const id = activeJob,
-          mode = notesMode,
-          version = notesVersion;
-        $("generateNotes").disabled = true;
-        $("notesStatus").textContent = "正在提交整理…";
-        try {
-          await api("/job/" + encodeURIComponent(id) + "/notes/" + mode, {
-            method: "POST",
-          });
-          if (version === notesVersion && id === activeJob) await loadNotes(id);
-        } catch (e) {
-          if (version === notesVersion) {
-            $("notesStatus").textContent = e.message;
-            $("generateNotes").disabled = false;
-          }
-        }
-      };
+      $("generateNotes").onclick = () => generateNote();
       function publicLink(config, port) {
         try {
           const url = config
@@ -2107,6 +2260,211 @@
       );
       if (financeLink) $("financeLink").href = financeLink;
       else $("financeLink").hidden = true;
+
+      let libraryPage = 1,
+        libraryTotal = 0,
+        jobsQueryVersion = 0,
+        libraryQuery = "",
+        libraryTimer,
+        editJobId = null;
+      function usesLibrary() {
+        return (
+          $("jobScope").value === "all" ||
+          $("favoriteOnly").checked ||
+          $("tagFilter").value.trim()
+        );
+      }
+      function changeLibrary() {
+        libraryPage = 1;
+        saveWorkspace();
+        renderJobs();
+      }
+      $("jobScope").onchange = changeLibrary;
+      $("favoriteOnly").onchange = changeLibrary;
+      $("tagFilter").oninput = () => {
+        clearTimeout(libraryTimer);
+        libraryTimer = setTimeout(changeLibrary, 250);
+      };
+      $("previousJobs").onclick = () => {
+        if (libraryPage > 1) {
+          libraryPage--;
+          renderJobs();
+        }
+      };
+      $("nextJobs").onclick = () => {
+        libraryPage++;
+        renderJobs();
+      };
+      function editJob(j) {
+        editJobId = j.id;
+        $("jobTitleEdit").value = j.topic || "";
+        $("jobTagsEdit").value = (j.tags || []).join(", ");
+        $("jobEditStatus").textContent = "";
+        $("jobEditDialog").showModal();
+      }
+      $("jobEditForm").onsubmit = async (e) => {
+        e.preventDefault();
+        const button = $("saveJobEdit");
+        button.disabled = true;
+        try {
+          await api("/job/" + encodeURIComponent(editJobId) + "/library", {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              topic: $("jobTitleEdit").value,
+              tags: $("jobTagsEdit")
+                .value.split(/[,，]/)
+                .map((t) => t.trim())
+                .filter(Boolean),
+            }),
+          });
+          $("jobEditDialog").close();
+          await renderJobs();
+          if (activeJob === editJobId) pollJob(activeJob);
+        } catch (err) {
+          $("jobEditStatus").textContent = err.message;
+        } finally {
+          button.disabled = false;
+        }
+      };
+      $("cancelJobEdit").onclick = () => $("jobEditDialog").close();
+      let noteView = "current",
+        editingNoteVersion = null;
+      function selectedNote() {
+        const note = notesData[notesMode] || {};
+        if (noteView === "original") return note.original || note;
+        if (noteView.startsWith("version:"))
+          return (note.versions || [])[Number(noteView.slice(8))] || note;
+        return note;
+      }
+      function renderNoteContent() {
+        const note = selectedNote(),
+          text =
+            noteView === "ai"
+              ? note.text
+              : (note.edited_text ?? note.text) || "";
+        $("notesText").replaceChildren();
+        const refs = new Map((note.references || []).map((r) => [r.id, r]));
+        let cursor = 0;
+        for (const match of text.matchAll(/\[S\d+\]/g)) {
+          $("notesText").append(
+            document.createTextNode(text.slice(cursor, match.index)),
+          );
+          const source = refs.get(match[0].slice(1, -1));
+          if (source) {
+            const button = el(
+              "button",
+              "btn-sm source-link",
+              source.time
+                ? source.time.split(" --> ")[0].replace(",", ".")
+                : source.id,
+            );
+            button.title = "查看原文：" + source.quote.slice(0, 120);
+            button.onclick = () => jumpSource(source);
+            $("notesText").append(button);
+          } else $("notesText").append(document.createTextNode(match[0]));
+          cursor = match.index + match[0].length;
+        }
+        $("notesText").append(document.createTextNode(text.slice(cursor)));
+        $("noteReferencesHint").textContent =
+          note.text && !refs.size
+            ? "這份結果未提供可定位引用；請自行對照原文。"
+            : "";
+        $("editNotes").disabled =
+          !(notesData[notesMode] || {}).text ||
+          (notesData[notesMode] || {}).status === "running";
+        $("regenerateNotes").disabled =
+          !notesEnabled || (notesData[notesMode] || {}).status === "running";
+      }
+      function jumpSource(source) {
+        $("transcriptSearch").value = "";
+        if (source.time && segments[source.index]) {
+          readingMode = "timeline";
+          renderTranscript();
+          const row = $("segments").children[source.index];
+          if (row) {
+            row.scrollIntoView({ behavior: "smooth", block: "center" });
+            row.tabIndex = -1;
+            row.focus({ preventScroll: true });
+            row.classList.add("source-highlight");
+            setTimeout(() => row.classList.remove("source-highlight"), 3000);
+          }
+        } else {
+          readingMode = "text";
+          renderTranscript();
+          const start = resultEl.value.indexOf(source.quote);
+          if (start >= 0) {
+            resultEl.focus();
+            resultEl.setSelectionRange(start, start + source.quote.length);
+          } else toast("無法定位原文，請使用逐字稿搜尋。");
+        }
+        saveWorkspace();
+      }
+      $("noteVersion").onchange = () => {
+        noteView = $("noteVersion").value;
+        renderNotes();
+      };
+      $("editNotes").onclick = () => {
+        const note = notesData[notesMode] || {};
+        editingNoteVersion = note.generated_at;
+        $("notesEditText").value = note.edited_text ?? note.text ?? "";
+        $("notesEditStatus").textContent = "";
+        $("notesEditDialog").showModal();
+      };
+      $("cancelNotesEdit").onclick = () => $("notesEditDialog").close();
+      $("notesEditForm").onsubmit = async (e) => {
+        e.preventDefault();
+        const button = $("saveNotesEdit");
+        button.disabled = true;
+        try {
+          await api(
+            "/job/" + encodeURIComponent(activeJob) + "/notes/" + notesMode,
+            {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                text: $("notesEditText").value,
+                generated_at: editingNoteVersion,
+              }),
+            },
+          );
+          $("notesEditDialog").close();
+          await loadNotes(activeJob);
+        } catch (err) {
+          $("notesEditStatus").textContent = err.message;
+        } finally {
+          button.disabled = false;
+        }
+      };
+      $("regenerateNotes").onclick = () => {
+        if (confirm("重新產生會保留最初版本及最近 10 個舊版。要繼續嗎？"))
+          generateNote(true);
+      };
+      async function generateNote(regenerate = false) {
+        const id = activeJob,
+          mode = notesMode,
+          version = notesVersion;
+        $("generateNotes").disabled = true;
+        $("regenerateNotes").disabled = true;
+        $("notesStatus").textContent = "正在提交整理…";
+        try {
+          await api("/job/" + encodeURIComponent(id) + "/notes/" + mode, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              regenerate,
+              instruction: $("noteInstruction").value,
+            }),
+          });
+          if (version === notesVersion && id === activeJob) await loadNotes(id);
+        } catch (e) {
+          if (version === notesVersion) {
+            $("notesStatus").textContent = e.message;
+            $("generateNotes").disabled = false;
+            $("regenerateNotes").disabled = false;
+          }
+        }
+      }
 
       restoreWorkspace();
     </script>
