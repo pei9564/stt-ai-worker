@@ -20,6 +20,9 @@ class InMemoryJobRepository:
     def save(self, job: Job) -> None:
         self._jobs[job.id] = job
 
+    def save_many(self, jobs: list[Job]) -> None:
+        self._jobs.update({job.id: job for job in jobs})
+
     def get(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)
 

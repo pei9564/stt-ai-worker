@@ -30,6 +30,10 @@ class JobRepository(Protocol):
         """新增或更新一筆 job。"""
         ...
 
+    def save_many(self, jobs: list[Job]) -> None:
+        """Persist a batch atomically."""
+        ...
+
     def get(self, job_id: str) -> Job | None:
         """取得單一 job；不存在回 None。"""
         ...

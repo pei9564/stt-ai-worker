@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import time
+from typing import Callable
+from pathlib import Path
+
 from app.domain.job import Job, JobResult
 from app.domain.ports import Transcriber, TranscriptRepository
 from app.infrastructure.naming import safe_stem
@@ -18,7 +22,13 @@ class TranscriptionService:
         *,
         default_language: str | None,
         default_batch_size: int,
+        audio_probe: Callable[[Path], float] | None = None,
+        max_audio_seconds: int = 7200,
+        max_job_seconds: int = 7200,
     ):
+        self._audio_probe = audio_probe
+        self._max_audio_seconds = max_audio_seconds
+        self._max_job_seconds = max_job_seconds
         self._transcriber = transcriber
         self._transcripts = transcripts
         self._default_language = default_language
@@ -32,12 +42,17 @@ class TranscriptionService:
         if job.source is None:
             raise RuntimeError("job 沒有音檔來源,無法處理")
 
+        started = time.monotonic()
         language = job.language or self._default_language
         batch_size = job.batch_size or self._default_batch_size
 
         with job.source.acquire() as audio_path:
+            if self._audio_probe and self._audio_probe(audio_path) > self._max_audio_seconds:
+                raise ValueError('音訊長度超過限制，請分段後重新提交')
             result = self._transcriber.transcribe(audio_path, language, batch_size)
 
+        if time.monotonic() - started > self._max_job_seconds:
+            raise TimeoutError('任務處理逾時，請分段後重試')
         srt = render_srt(result.segments)
         topic = safe_stem(job.topic or job.source.display_name)
         tid = self._transcripts.save(

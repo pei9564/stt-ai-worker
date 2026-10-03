@@ -10,7 +10,8 @@ import logging
 import pathlib
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from psycopg_pool import ConnectionPool
 
 from app.api.routes import router
@@ -21,7 +22,7 @@ from app.domain.ports import JobRepository, Transcriber, TranscriptRepository
 from app.infrastructure.pg_job_repository import PostgresJobRepository
 from app.infrastructure.transcript_repository import PostgresTranscriptRepository
 from app.logging_config import configure_logging
-from app.services.job_service import JobService
+from app.services.job_service import JobService, QueueFullError
 from app.services.transcription import TranscriptionService
 from app.services.worker import TranscriptionWorker
 
@@ -31,7 +32,7 @@ _SCHEMA_PATH = pathlib.Path(__file__).parent / "infrastructure" / "schema.sql"
 
 _DESCRIPTION = (
     "語音轉文字服務。所有轉檔請求 (YouTube 連結 / RSS) 都會排進單一佇列,"
-    "由一個 worker 依序處理,不會因為「使用中」而被拒絕。\n\n"
+    "由一個 worker 依序處理,佇列滿時回傳 429。\n\n"
     "**使用流程**:POST 任一轉檔端點 → 取得 `job_id` → 輪詢 `GET /job/{job_id}` "
     "直到 `status` 變成 `done`,即可從 `text` 取得逐字稿。逐字稿同時會存進 "
     "PG 的 `transcripts` 表,可用 `transcript_id` 引用。"
@@ -78,9 +79,13 @@ def create_app(
     if transcript_repository is None:
         transcript_repository = PostgresTranscriptRepository(pool)  # type: ignore[arg-type]
 
-    job_service = JobService(job_repository, jobs_window_hours=settings.jobs_window_hours)
+    job_service = JobService(job_repository, jobs_window_hours=settings.jobs_window_hours,
+                             max_pending_jobs=settings.max_pending_jobs)
+    audio_probe = None
 
     if transcriber is None:
+        from app.infrastructure.limits import probe_duration
+        audio_probe = probe_duration
         from app.infrastructure.transcriber import WhisperTranscriber
 
         transcriber = WhisperTranscriber(
@@ -92,8 +97,11 @@ def create_app(
         transcript_repository,
         default_language=settings.language,
         default_batch_size=settings.batch_size,
+        audio_probe=audio_probe,
+        max_audio_seconds=settings.max_audio_seconds,
+        max_job_seconds=settings.max_job_seconds,
     )
-    worker = TranscriptionWorker(job_service, transcription_service)
+    worker = TranscriptionWorker(job_service, transcription_service, max_job_seconds=settings.max_job_seconds)
 
     container = Container(
         settings=settings,
@@ -129,6 +137,23 @@ def create_app(
         description=_DESCRIPTION,
         lifespan=lifespan,
     )
+    @app.exception_handler(QueueFullError)
+    async def full_queue(request: Request, exc: QueueFullError):
+        return JSONResponse(status_code=429, content={'detail': str(exc)}, headers={'Retry-After': '30'})
+
+    @app.middleware('http')
+    async def upload_header_limit(request: Request, call_next):
+        length = request.headers.get('content-length')
+        if length:
+            try:
+                if int(length) > settings.max_upload_bytes + 1024 * 1024:
+                    return JSONResponse(status_code=413, content={'detail': '上傳超過大小限制'})
+            except ValueError:
+                return JSONResponse(status_code=400, content={'detail': '無效的 Content-Length'})
+        return await call_next(request)
+
+    from app.infrastructure.limits import BodyLimitMiddleware
+    app.add_middleware(BodyLimitMiddleware, max_bytes=settings.max_upload_bytes + 1024 * 1024)
     app.state.container = container
     app.include_router(router)
     return app

@@ -8,6 +8,9 @@
 from __future__ import annotations
 
 import subprocess
+import os
+import signal
+import time
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -18,6 +21,7 @@ import feedparser
 import requests
 
 from app.domain.audio_source import AudioSource
+from app.infrastructure.limits import positive_env, require_disk
 from app.infrastructure.naming import safe_stem
 
 _AUDIO_EXTS = (".mp3", ".m4a", ".aac", ".ogg", ".wav")
@@ -31,19 +35,59 @@ def download_with_ytdlp(url: str, dest_dir: Path) -> Path:
         "yt-dlp", "-x", "--audio-format", "mp3", "--no-playlist",
         "--no-progress", "-o", out_tmpl, "--print", "after_move:filepath", url,
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-    if result.returncode != 0:
-        raise RuntimeError(f"yt-dlp 失敗: {result.stderr.strip()[-400:]}")
-    return Path(result.stdout.strip().splitlines()[-1])
+    maximum = positive_env('MAX_DOWNLOAD_BYTES', 512 * 1024 * 1024)
+    deadline = time.monotonic() + positive_env('DOWNLOAD_TIMEOUT_SECONDS', 600)
+    require_disk(dest_dir)
+    cmd[1:1] = ['--max-filesize', str(maximum), '--socket-timeout', '20', '--retries', '2', '--fragment-retries', '2']
+    # File-backed logs avoid unbounded PIPE buffers; terminate ffmpeg children as well.
+    with tempfile.TemporaryFile() as output, tempfile.TemporaryFile() as errors:
+        process = subprocess.Popen(cmd, stdout=output, stderr=errors, start_new_session=True)
+        try:
+            while process.poll() is None:
+                if time.monotonic() > deadline:
+                    raise TimeoutError('下載逾時，請稍後重試或上傳本地音檔')
+                if sum(p.stat().st_size for p in dest_dir.rglob('*') if p.is_file()) > maximum:
+                    raise ValueError('下載音檔超過大小限制')
+                require_disk(dest_dir)
+                time.sleep(0.1)
+            if process.returncode:
+                raise RuntimeError('影音下載失敗，請確認來源仍可存取，或改用本地上傳')
+            output.seek(0)
+            lines = output.read().decode().strip().splitlines()
+            if not lines:
+                raise ValueError('未取得音檔，可能超過大小限制或來源不可用')
+            path = Path(lines[-1])
+            if path.stat().st_size > maximum:
+                raise ValueError('下載音檔超過大小限制')
+            return path
+        finally:
+            if process.poll() is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
 
 
 def download_file(url: str, dest_dir: Path, name_hint: str) -> Path:
     """直接下載音檔連結。"""
     dest = dest_dir / f"{safe_stem(name_hint)}.mp3"
-    with requests.get(url, stream=True, timeout=60) as r:
+    maximum = positive_env('MAX_DOWNLOAD_BYTES', 512 * 1024 * 1024)
+    deadline = time.monotonic() + positive_env('DOWNLOAD_TIMEOUT_SECONDS', 600)
+    require_disk(dest_dir)
+    with requests.get(url, stream=True, timeout=(10, 20)) as r:
         r.raise_for_status()
+        if int(r.headers.get('Content-Length', 0)) > maximum:
+            raise ValueError('下載音檔超過大小限制')
+        size = 0
         with open(dest, "wb") as fh:
             for chunk in r.iter_content(chunk_size=1 << 20):
+                size += len(chunk)
+                if size > maximum:
+                    raise ValueError('下載音檔超過大小限制')
+                if time.monotonic() > deadline:
+                    raise TimeoutError('下載逾時，請稍後重試')
+                require_disk(dest_dir)
                 fh.write(chunk)
     return dest
 
@@ -149,7 +193,15 @@ def extract_episodes(entries, limit: int) -> list[FeedEpisode]:
 
 def parse_feed(feed_url: str, limit: int) -> list[FeedEpisode]:
     """解析 RSS feed URL，回傳集數清單。解析失敗丟 RuntimeError。"""
-    parsed = feedparser.parse(feed_url)
+    with requests.get(feed_url, stream=True, timeout=(10, 20)) as response:
+        response.raise_for_status()
+        data = bytearray()
+        deadline = time.monotonic() + 60
+        for chunk in response.iter_content(65536):
+            data.extend(chunk)
+            if len(data) > 5 * 1024 * 1024 or time.monotonic() > deadline:
+                raise ValueError('RSS 超過大小／時間限制')
+    parsed = feedparser.parse(bytes(data))
     if parsed.bozo and not parsed.entries:
         raise RuntimeError(f"RSS 解析失敗: {parsed.bozo_exception}")
     return extract_episodes(parsed.entries, limit)

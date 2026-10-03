@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import tempfile
 from pathlib import Path
 
@@ -31,6 +30,7 @@ from app.infrastructure.audio_sources import (
     parse_feed,
 )
 from app.infrastructure.gpu import read_gpu_stats
+from app.infrastructure.limits import require_disk
 
 router = APIRouter()
 
@@ -154,6 +154,15 @@ def get_job(job_id: str, container: Container = Depends(get_container)) -> JobVi
     return to_job_view(job, include_text=True)
 
 
+def _validate_input(container, batch_size, url=None):
+    if not 0 <= batch_size <= container.settings.max_batch_size:
+        raise HTTPException(422, detail=f'batch_size 必須在 0～{container.settings.max_batch_size}')
+    if url:
+        from urllib.parse import urlsplit
+        if urlsplit(url).scheme not in ('http', 'https') or not urlsplit(url).hostname:
+            raise HTTPException(422, detail='請提供 HTTP／HTTPS 網址')
+
+
 # ---- 轉檔 ----
 @router.post("/transcribe_url", status_code=202, tags=["轉檔"], summary="從 YouTube / 影音連結轉文字")
 def transcribe_url(
@@ -164,6 +173,7 @@ def transcribe_url(
     container: Container = Depends(get_container),
 ) -> JobCreated:
     """貼一個影音網址加入轉檔佇列。立即回傳 `job_id`，請輪詢 `GET /job/{job_id}` 取得結果。"""
+    _validate_input(container, batch_size, url)
     job = container.job_service.create(
         job_type=JobType.URL,
         source=YtDlpSource(url),
@@ -183,21 +193,20 @@ def transcribe_feed(
     container: Container = Depends(get_container),
 ) -> FeedQueued:
     """解析 RSS，將每一集各自加入佇列 (每集一個獨立 job)。每集的 topic 自動用單集標題。"""
+    _validate_input(container, batch_size, feed_url)
+    if limit < 0 or limit > container.settings.max_feed_episodes:
+        raise HTTPException(422, detail='RSS 集數超過限制')
     try:
-        episodes = parse_feed(feed_url, limit)
+        episodes = parse_feed(feed_url, limit or container.settings.max_feed_episodes)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    job_ids = [
-        container.job_service.create(
-            job_type=JobType.FEED_EPISODE,
-            source=DirectUrlSource(ep.audio_url, ep.title),
-            topic=ep.title,
-            language=language,
-            batch_size=batch_size,
-        ).id
+    accepted = container.job_service.create_many([
+        dict(type=JobType.FEED_EPISODE, source=DirectUrlSource(ep.audio_url, ep.title),
+             topic=ep.title, language=language or None, batch_size=batch_size)
         for ep in episodes
-    ]
+    ])
+    job_ids = [job.id for job in accepted]
     return FeedQueued(feed_job_ids=job_ids, count=len(job_ids))
 
 
@@ -210,6 +219,9 @@ def transcribe_file(
     container: Container = Depends(get_container),
 ) -> JobCreated:
     """上傳一個音訊檔案加入轉檔佇列。立即回傳 `job_id`，請輪詢 `GET /job/{job_id}` 取得結果。"""
+    _validate_input(container, batch_size)
+    if file.size is not None and file.size > container.settings.max_upload_bytes:
+        raise HTTPException(413, detail='上傳超過大小限制')
     filename = file.filename or ""
     ext = Path(filename).suffix.lower()
     valid_exts = {".mp3", ".m4a", ".aac", ".ogg", ".wav", ".mp4", ".flac"}
@@ -222,11 +234,20 @@ def transcribe_file(
     # 建立暫存檔並寫入內容
     upload_dir = Path(os.environ.get("UPLOAD_DIR", "/data/uploads"))
     upload_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        require_disk(upload_dir, file.size or 0)
+    except RuntimeError as exc:
+        raise HTTPException(507, detail=str(exc)) from exc
     actual_topic = topic or Path(filename).stem
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext, dir=upload_dir) as tmp_file:
         tmp_path = Path(tmp_file.name)
         try:
-            shutil.copyfileobj(file.file, tmp_file)
+            size = 0
+            while chunk := file.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > container.settings.max_upload_bytes:
+                    raise HTTPException(413, detail='上傳超過大小限制')
+                tmp_file.write(chunk)
         except Exception:
             tmp_path.unlink(missing_ok=True)
             raise

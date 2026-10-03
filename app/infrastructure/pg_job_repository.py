@@ -61,40 +61,48 @@ class PostgresJobRepository:
         self._pool = pool
 
     def save(self, job: Job) -> None:
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            self._save(cur, job)
+
+    def save_many(self, jobs: list[Job]) -> None:
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            for job in jobs:
+                self._save(cur, job)
+
+    def _save(self, cur, job: Job) -> None:
         tid = job.result.transcript_id if job.result else None
         source = serialize_source(job.source)
-        with self._pool.connection() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO jobs (
-                    id, type, topic, language, batch_size, status,
-                    created_at, started_at, finished_at,
-                    transcript_id, error, source
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                ON CONFLICT (id) DO UPDATE SET
-                    status        = EXCLUDED.status,
-                    started_at    = EXCLUDED.started_at,
-                    finished_at   = EXCLUDED.finished_at,
-                    transcript_id = EXCLUDED.transcript_id,
-                    error         = EXCLUDED.error,
-                    source        = EXCLUDED.source
-                """,
-                (
-                    job.id,
-                    job.type.value,
-                    job.topic,
-                    job.language,
-                    job.batch_size,
-                    job.status.value,
-                    job.created_at,
-                    job.started_at,
-                    job.finished_at,
-                    tid,
-                    job.error,
-                    Jsonb(source) if source is not None else None,
-                ),
+        cur.execute(
+            """
+            INSERT INTO jobs (
+                id, type, topic, language, batch_size, status,
+                created_at, started_at, finished_at,
+                transcript_id, error, source
             )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (id) DO UPDATE SET
+                status        = EXCLUDED.status,
+                started_at    = EXCLUDED.started_at,
+                finished_at   = EXCLUDED.finished_at,
+                transcript_id = EXCLUDED.transcript_id,
+                error         = EXCLUDED.error,
+                source        = EXCLUDED.source
+            """,
+            (
+                job.id,
+                job.type.value,
+                job.topic,
+                job.language,
+                job.batch_size,
+                job.status.value,
+                job.created_at,
+                job.started_at,
+                job.finished_at,
+                tid,
+                job.error,
+                Jsonb(source) if source is not None else None,
+            ),
+        )
 
     def get(self, job_id: str) -> Job | None:
         with self._pool.connection() as conn, conn.cursor() as cur:

@@ -79,3 +79,20 @@ TEST_PG_DSN=postgresql://test:test@localhost:5432/test .venv/bin/python -m pytes
 ```
 
 整合測試使用假轉錄模型，驗證真正 PG 的來源還原、服務重啟與失敗重試，無需 GPU。
+
+## 任務資源限制
+
+STT 預設上傳／下載 512 MiB、音訊最長 7200 秒、queued＋running 共 20 筆、RSS 單次 20 集、batch_size 最大 16。
+0 集數表示抓到設定的上限，不再代表無限；RSS 容量不足時整批拒絕，回 429。
+超大上傳回 413，低磁碟空間回 507；失敗上傳會清理暫存檔。
+`MAX_UPLOAD_BYTES`、`MAX_DOWNLOAD_BYTES`、`MAX_AUDIO_SECONDS`、`MAX_PENDING_JOBS`、
+`MAX_FEED_EPISODES`、`MAX_BATCH_SIZE`、`MIN_FREE_DISK_BYTES` 可調整。
+下載總時間由 `DOWNLOAD_TIMEOUT_SECONDS`（600）限制，RSS 有 5 MiB／60 秒上限。
+正式 STT 在 GPU 推論前用 ffprobe 驗證音訊格式／長度（測試注入的 fake model 路徑不執行 ffprobe）。
+
+`MAX_JOB_SECONDS`（7200）逾時後將工作標為失敗、健康檢查回 503，由 K3s liveness 重啟服務。
+GPU thread 不能安全硬中止；尚未回收 GPU 前不會啟動下一個任務，逾時工作不自動恢復，需手動重試。
+Compose 沒有 Kubernetes liveness 控制器，逾時後請自行 restart STT。
+LLM HTTP timeout 用 `LLM_TIMEOUT_SECONDS`（120），空白／格式錯誤回覆視為失敗。
+scraper STT 輪詢由 `STT_TIMEOUT_SECONDS` 控制；infra 預設 7200 秒，
+超時只停止等候，不會取消遠端工作，可到 STT UI 查看它。

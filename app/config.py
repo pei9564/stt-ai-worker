@@ -17,6 +17,12 @@ class Settings:
     batch_size: int
     db_url: str
     jobs_window_hours: int
+    max_upload_bytes: int = 512 * 1024 * 1024
+    max_audio_seconds: int = 7200
+    max_pending_jobs: int = 20
+    max_feed_episodes: int = 20
+    max_batch_size: int = 16
+    max_job_seconds: int = 7200
 
 
 def load_settings() -> Settings:
@@ -29,4 +35,19 @@ def load_settings() -> Settings:
         batch_size=int(os.getenv("BATCH_SIZE", "4")),
         db_url=os.environ["DB_URL"],
         jobs_window_hours=int(os.getenv("JOBS_WINDOW_HOURS", "48")),
+        **{name: _positive(env, default) for name, env, default in (
+            ('max_upload_bytes', 'MAX_UPLOAD_BYTES', 512 * 1024 * 1024),
+            ('max_audio_seconds', 'MAX_AUDIO_SECONDS', 7200),
+            ('max_pending_jobs', 'MAX_PENDING_JOBS', 20),
+            ('max_feed_episodes', 'MAX_FEED_EPISODES', 20),
+            ('max_batch_size', 'MAX_BATCH_SIZE', 16),
+            ('max_job_seconds', 'MAX_JOB_SECONDS', 7200),
+        )},
     )
+
+
+def _positive(name: str, default: int) -> int:
+    value = int(os.getenv(name, default))
+    if value <= 0:
+        raise ValueError(f'{name} must be positive')
+    return value

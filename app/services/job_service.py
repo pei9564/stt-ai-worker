@@ -19,12 +19,17 @@ from app.domain.ports import JobRepository
 log = logging.getLogger(__name__)
 
 
+class QueueFullError(ValueError):
+    pass
+
+
 class JobService:
     """job 生命週期的單一進入點。"""
 
-    def __init__(self, repo: JobRepository, *, jobs_window_hours: int):
+    def __init__(self, repo: JobRepository, *, jobs_window_hours: int, max_pending_jobs: int = 20):
         self._repo = repo
         self._window_hours = jobs_window_hours
+        self._max_pending = max_pending_jobs
         self._lock = threading.Lock()
         self._queue: "queue.Queue[str | None]" = queue.Queue()
 
@@ -48,9 +53,19 @@ class JobService:
             source=source,
         )
         with self._lock:
+            self._require_capacity()
             self._repo.save(job)
-        self._queue.put(job.id)
+            self._queue.put(job.id)
         return job
+
+    def create_many(self, specs: list[dict]) -> list[Job]:
+        with self._lock:
+            self._require_capacity(len(specs))
+            jobs = [Job(id=uuid.uuid4().hex[:12], **spec) for spec in specs]
+            self._repo.save_many(jobs)
+            for job in jobs:
+                self._queue.put(job.id)
+            return jobs
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
@@ -70,7 +85,16 @@ class JobService:
         self._transition(job_id, lambda job: job.mark_running())
 
     def mark_done(self, job_id: str, result: JobResult) -> None:
-        self._transition(job_id, lambda job: job.mark_done(result))
+        self._transition(job_id, lambda job: job.mark_done(result) if job.status == JobStatus.RUNNING else None)
+
+    def expire(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._repo.get(job_id)
+            if job is None or job.status != JobStatus.RUNNING:
+                return False
+            job.mark_error('任務處理逾時，服務需重啟；請分段後重試')
+            self._repo.save(job)
+            return True
 
     def mark_error(self, job_id: str, message: str) -> None:
         self._transition(job_id, lambda job: job.mark_error(message))
@@ -110,6 +134,7 @@ class JobService:
             job = self._repo.get(job_id)
             if job is None or job.status != JobStatus.ERROR or job.source is None:
                 return False
+            self._require_capacity()
             self._reset(job)
             self._repo.save(job)
             self._queue.put(job.id)
@@ -165,4 +190,10 @@ class JobService:
 
     @property
     def queue_size(self) -> int:
-        return self._queue.qsize()
+        with self._lock:
+            return sum(j.status == JobStatus.QUEUED for j in self._repo.all())
+
+    def _require_capacity(self, count: int = 1) -> None:
+        active = sum(j.status in (JobStatus.QUEUED, JobStatus.RUNNING) for j in self._repo.all())
+        if active + count > self._max_pending:
+            raise QueueFullError('任務佇列已滿，請等現有任務完成後再提交')

@@ -15,7 +15,9 @@ log = logging.getLogger(__name__)
 class TranscriptionWorker:
     """從 JobService 的佇列取 job，交給 TranscriptionService 處理。"""
 
-    def __init__(self, job_service: JobService, transcription_service: TranscriptionService):
+    def __init__(self, job_service: JobService, transcription_service: TranscriptionService, *, max_job_seconds: int = 7200):
+        self._max_job_seconds = max_job_seconds
+        self._timed_out = threading.Event()
         self._jobs = job_service
         self._transcription = transcription_service
         self._thread: threading.Thread | None = None
@@ -23,7 +25,7 @@ class TranscriptionWorker:
 
     @property
     def is_alive(self) -> bool:
-        return self._thread is not None and self._thread.is_alive()
+        return self._thread is not None and self._thread.is_alive() and not self._timed_out.is_set()
 
     def start(self) -> None:
         """啟動 worker thread。"""
@@ -56,8 +58,23 @@ class TranscriptionWorker:
             return  # 已取消或重複處理，跳過
         self._jobs.mark_running(job_id)
         log.info("job %s 開始 (%s)", job_id, job.type.value)
+        def expired():
+            try:
+                if self._jobs.expire(job_id):
+                    self._timed_out.set()
+                    self._stopping.set()
+            except Exception:
+                self._timed_out.set()
+                self._stopping.set()
+                log.exception('job %s timeout persistence failed', job_id)
+        watchdog = threading.Timer(self._max_job_seconds, expired)
+        watchdog.daemon = True
+        watchdog.start()
         try:
             result = self._transcription.process(job)
+            if self._timed_out.is_set():
+                return
+            watchdog.cancel()
             self._jobs.mark_done(job_id, result)
             log.info("job %s 完成 → transcript #%d", job_id, result.transcript_id)
             if job.source is not None:
@@ -68,3 +85,6 @@ class TranscriptionWorker:
         except Exception as e:
             self._jobs.mark_error(job_id, str(e))
             log.error("job %s 失敗: %s", job_id, e)
+
+        finally:
+            watchdog.cancel()
