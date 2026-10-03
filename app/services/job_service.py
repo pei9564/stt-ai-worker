@@ -8,6 +8,10 @@ from __future__ import annotations
 
 import datetime
 import logging
+import hashlib
+import json
+from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 import queue
 import threading
 import uuid
@@ -27,7 +31,8 @@ class QueueFullError(ValueError):
 class JobService:
     """job 生命週期的單一進入點。"""
 
-    def __init__(self, repo: JobRepository, *, jobs_window_hours: int, max_pending_jobs: int = 20):
+    def __init__(self, repo: JobRepository, *, jobs_window_hours: int, max_pending_jobs: int = 20, profile: str = "default"):
+        self._profile = profile
         self._repo = repo
         self._window_hours = jobs_window_hours
         self._max_pending = max_pending_jobs
@@ -45,29 +50,79 @@ class JobService:
         batch_size: int,
     ) -> Job:
         """建立一筆 job、持久化、排進佇列，回傳 Job。"""
-        job = Job(
-            id=uuid.uuid4().hex[:12],
-            type=job_type,
-            topic=topic or None,
-            language=language or None,
-            batch_size=batch_size,
-            source=source,
-            details={"request_id": request_id_var.get()},
-        )
-        with self._lock:
-            self._require_capacity()
-            self._repo.save(job)
-            self._queue.put(job.id)
-        return job
+        return self.create_many([dict(type=job_type, source=source, topic=topic or None,
+                                      language=language or None, batch_size=batch_size)])[0]
+
+    def _key(self, spec: dict) -> str | None:
+        from app.infrastructure.audio_sources import serialize_source
+        try:
+            data = serialize_source(spec['source'])
+        except ValueError:
+            return None  # injected test/custom sources have no stable identity
+        if not data:
+            return None
+        if data['kind'] == 'file':
+            identity = data.get('sha256')
+            if not identity:
+                return None
+        else:
+            parts = urlsplit(data['url'])
+            query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
+                     if not k.lower().startswith('utm_') and k.lower() not in ('fbclid', 'gclid')]
+            identity = urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path,
+                                  urlencode(sorted(query)), ''))
+        payload = [data['kind'], identity, spec['language'], spec['batch_size'], spec['topic'], self._profile]
+        return hashlib.sha256(json.dumps(payload, ensure_ascii=False).encode()).hexdigest()
 
     def create_many(self, specs: list[dict]) -> list[Job]:
         with self._lock:
-            self._require_capacity(len(specs))
-            jobs = [Job(id=uuid.uuid4().hex[:12], details={"request_id": request_id_var.get()}, **spec) for spec in specs]
-            self._repo.save_many(jobs)
-            for job in jobs:
+            existing = {j.details.get('dedupe_key'): j for j in self._repo.all()
+                        if j.status != JobStatus.ERROR and j.details.get('dedupe_key')}
+            accepted, fresh, redundant = [], [], []
+            for spec in specs:
+                key = self._key(spec)
+                if key and key in existing:
+                    accepted.append(existing[key])
+                    if spec['source'] is not existing[key].source:
+                        redundant.append(spec['source'])
+                    continue
+                job = Job(id=uuid.uuid4().hex[:12],
+                          details={'request_id': request_id_var.get(), 'dedupe_key': key}, **spec)
+                fresh.append(job)
+                accepted.append(job)
+                if key:
+                    existing[key] = job
+            self._require_capacity(len(fresh))
+            if fresh:
+                self._repo.save_many(fresh)
+            for job in fresh:
                 self._queue.put(job.id)
-            return jobs
+            for source in redundant:
+                source.cleanup()
+            return accepted
+
+    def prune_failed(self, *, days: int = 7, upload_dir: Path | None = None, dry_run: bool = True) -> dict:
+        if days < 1:
+            raise ValueError('保留天數必須至少 1 天')
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+        with self._lock:
+            jobs = self._repo.all()
+            expired = [j for j in jobs if j.status == JobStatus.ERROR
+                       and (j.finished_at or j.created_at) < cutoff and j.result is None]
+            from app.infrastructure.audio_sources import LocalFileSource
+            referenced = {j.source._file_path.resolve() for j in jobs
+                          if isinstance(j.source, LocalFileSource)}
+            orphans = [p for p in upload_dir.glob('tmp*')
+                       if p.is_file() and not p.is_symlink() and p.resolve() not in referenced
+                       and p.stat().st_mtime < cutoff.timestamp()] if upload_dir and upload_dir.exists() else []
+            if not dry_run:
+                for job in expired:
+                    if job.source:
+                        job.source.cleanup()
+                    self._repo.delete(job.id)
+                for path in orphans:
+                    path.unlink(missing_ok=True)
+            return {'dry_run': dry_run, 'failed_jobs': [j.id for j in expired], 'orphan_files': len(orphans)}
 
     def get(self, job_id: str) -> Job | None:
         with self._lock:
@@ -83,8 +138,14 @@ class JobService:
         return jobs
 
     # ---- 狀態轉移 (worker thread 使用) ----
-    def mark_running(self, job_id: str) -> None:
-        self._transition(job_id, lambda job: job.mark_running())
+    def mark_running(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._repo.get(job_id)
+            if not job or job.status != JobStatus.QUEUED:
+                return False
+            job.mark_running()
+            self._repo.save(job)
+            return True
 
     def mark_done(self, job_id: str, result: JobResult) -> None:
         self._transition(job_id, lambda job: job.mark_done(result) if job.status == JobStatus.RUNNING else None)
@@ -159,6 +220,8 @@ class JobService:
             job = self._repo.get(job_id)
             if job is None:
                 return False
+            if job.status == JobStatus.RUNNING:
+                raise ValueError("job 執行中，無法刪除")
             if job.source is not None:
                 job.source.cleanup()
             self._repo.delete(job_id)

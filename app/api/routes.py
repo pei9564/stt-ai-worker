@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import tempfile
 from pathlib import Path
 
@@ -123,7 +124,10 @@ def delete_job(job_id: str, container: Container = Depends(get_container)) -> De
         container.transcripts.delete(job.result.transcript_id)
         transcript_deleted = job.result.transcript_id
 
-    container.job_service.delete(job_id)
+    try:
+        container.job_service.delete(job_id)
+    except ValueError as exc:
+        raise HTTPException(409, detail=str(exc)) from exc
     return DeletedResponse(deleted=job_id, transcript_deleted=transcript_deleted)
 
 
@@ -243,10 +247,12 @@ def transcribe_file(
         tmp_path = Path(tmp_file.name)
         try:
             size = 0
+            digest = hashlib.sha256()
             while chunk := file.file.read(1024 * 1024):
                 size += len(chunk)
                 if size > container.settings.max_upload_bytes:
                     raise HTTPException(413, detail='上傳超過大小限制')
+                digest.update(chunk)
                 tmp_file.write(chunk)
         except Exception:
             tmp_path.unlink(missing_ok=True)
@@ -255,7 +261,7 @@ def transcribe_file(
     try:
         job = container.job_service.create(
             job_type=JobType.FILE,
-            source=LocalFileSource(tmp_path, actual_topic),
+            source=LocalFileSource(tmp_path, actual_topic, digest.hexdigest()),
             topic=actual_topic,
             language=language,
             batch_size=batch_size,
@@ -264,3 +270,11 @@ def transcribe_file(
         tmp_path.unlink(missing_ok=True)
         raise
     return JobCreated(job_id=job.id, status=job.status.value)
+
+
+@router.post('/maintenance/prune', tags=['系統'])
+def prune(days: int = 7, dry_run: bool = True, container: Container = Depends(get_container)):
+    if days < 1:
+        raise HTTPException(422, detail='days 必須至少 1')
+    return container.job_service.prune_failed(days=days, dry_run=dry_run,
+                     upload_dir=Path(os.getenv('UPLOAD_DIR', '/data/uploads')))

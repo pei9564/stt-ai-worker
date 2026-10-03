@@ -84,7 +84,8 @@ def create_app(
         transcript_repository = PostgresTranscriptRepository(pool)  # type: ignore[arg-type]
 
     job_service = JobService(job_repository, jobs_window_hours=settings.jobs_window_hours,
-                             max_pending_jobs=settings.max_pending_jobs)
+                             max_pending_jobs=settings.max_pending_jobs,
+                             profile=f"{settings.model}|{settings.language}|{settings.batch_size}")
     audio_probe = None
 
     if transcriber is None:

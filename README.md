@@ -121,3 +121,9 @@ STT `/diagnostics`、scraper `/api/diagnostics` 提供狀態與磁碟資訊。
 不傳送全文、URL、credentials 或 webhook 位址。服務每 60 秒檢查 DB／磁碟。
 K3s Service 已加 scrape annotations；要保存歷史圖表仍需自行接 Prometheus 等收集器。
 進程完全停止時無法自行通知，需外部監控／K3s 告警補足。
+
+### 去重與保留
+
+相同來源、模型設定、語言、批次大小與 topic 的 queued/running/done 工作會直接回傳原 job ID；URL 忽略 fragment 和 utm/fbclid/gclid，檔案以 SHA-256 判斷。失敗工作可明確 retry，重新提交也可建立新工作。此機制適用單一 STT replica。
+
+`POST /maintenance/prune?days=7` 預覽過期失敗工作與無引用上傳暫存檔；加 `&dry_run=false` 才執行。保留天數至少 1 天，不刪正在執行、排隊或完成的逐字稿。成功上傳音檔在完成後清除；失敗音檔留供重試，超過保留期可清理。清理目前由使用者手動呼叫，建議備份後再執行。

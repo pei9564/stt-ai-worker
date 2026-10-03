@@ -141,7 +141,8 @@ class LocalFileSource(AudioSource):
     保留檔案供失敗重試；成功或刪除任務後由 cleanup() 清理。
     """
 
-    def __init__(self, file_path: Path, display_name: str):
+    def __init__(self, file_path: Path, display_name: str, sha256: str | None = None):
+        self.sha256 = sha256
         self._file_path = Path(file_path)
         self._display_name = display_name
 
@@ -216,7 +217,7 @@ def serialize_source(source: AudioSource | None) -> dict | None:
     if isinstance(source, DirectUrlSource):
         return {"kind": "direct", "url": source._audio_url, "title": source._title}
     if isinstance(source, LocalFileSource):
-        return {"kind": "file", "path": str(source._file_path), "title": source.display_name}
+        return {"kind": "file", "path": str(source._file_path), "title": source.display_name, "sha256": source.sha256}
     raise ValueError(f"來源不支援持久化: {type(source).__name__}")
 
 
@@ -228,5 +229,5 @@ def deserialize_source(data: dict | None) -> AudioSource | None:
     if data["kind"] == "direct":
         return DirectUrlSource(data["url"], data["title"])
     if data["kind"] == "file":
-        return LocalFileSource(Path(data["path"]), data["title"])
+        return LocalFileSource(Path(data["path"]), data["title"], data.get("sha256"))
     raise ValueError(f"未知音訊來源: {data['kind']}")

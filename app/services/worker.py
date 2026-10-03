@@ -61,7 +61,8 @@ class TranscriptionWorker:
         if job is None or job.status != JobStatus.QUEUED:
             return  # 已取消或重複處理，跳過
         started = time.monotonic()
-        self._jobs.mark_running(job_id)
+        if not self._jobs.mark_running(job_id):
+            return
         log.info("job %s 開始 (%s)", job_id, job.type.value)
         def expired():
             try:
