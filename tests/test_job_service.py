@@ -44,11 +44,11 @@ def test_list_recent_filters_by_window_and_newest_first():
     svc = JobService(repo, jobs_window_hours=24)
 
     old = Job(id="old", type=JobType.FILE, topic=None, language=None, batch_size=4,
-              created_at=datetime.datetime.now() - datetime.timedelta(hours=48))
+              created_at=datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=48))
     recent = Job(id="recent", type=JobType.FILE, topic=None, language=None, batch_size=4,
-                 created_at=datetime.datetime.now() - datetime.timedelta(hours=1))
+                 created_at=datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=1))
     newest = Job(id="newest", type=JobType.FILE, topic=None, language=None, batch_size=4,
-                 created_at=datetime.datetime.now())
+                 created_at=datetime.datetime.now(datetime.timezone.utc))
     for job in (old, recent, newest):
         repo.save(job)
 

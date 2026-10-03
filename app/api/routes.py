@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Form, HTTPException
-from fastapi.responses import HTMLResponse
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.api.deps import get_container
 from app.api.schemas import (
@@ -21,6 +26,7 @@ from app.container import Container
 from app.domain.job import JobType
 from app.infrastructure.audio_sources import (
     DirectUrlSource,
+    LocalFileSource,
     YtDlpSource,
     parse_feed,
 )
@@ -59,6 +65,33 @@ def health(container: Container = Depends(get_container)) -> HealthResponse:
 def gpu() -> dict:
     """讀取 nvidia-smi：GPU 使用率、VRAM 用量、功耗、溫度。容器若讀不到 GPU 則 `available` 為 false。"""
     return read_gpu_stats()
+
+
+@router.get("/healthz", tags=["系統"])
+def healthz(container: Container = Depends(get_container)):
+    if not container.worker.is_alive:
+        return JSONResponse(status_code=503, content={"status": "worker unavailable"})
+    return {"status": "ok"}
+
+
+@router.get("/readyz", tags=["系統"])
+def readyz(container: Container = Depends(get_container)):
+    if not container.worker.is_alive:
+        return JSONResponse(status_code=503, content={"status": "worker unavailable"})
+    try:
+        container.job_service.get("__readiness__")
+    except Exception:
+        return JSONResponse(status_code=503, content={"status": "database unavailable"})
+    return {"status": "ready"}
+
+
+@router.post("/job/{job_id}/retry", status_code=202, tags=["任務查詢"])
+def retry_job(job_id: str, container: Container = Depends(get_container)) -> JobCreated:
+    if container.job_service.get(job_id) is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if not container.job_service.retry(job_id):
+        raise HTTPException(status_code=409, detail="僅能重試保有音檔來源的失敗任務")
+    return JobCreated(job_id=job_id, status="queued")
 
 
 # ---- 任務查詢 ----
@@ -166,3 +199,47 @@ def transcribe_feed(
         for ep in episodes
     ]
     return FeedQueued(feed_job_ids=job_ids, count=len(job_ids))
+
+
+@router.post("/transcribe_file", status_code=202, tags=["轉檔"], summary="上傳本地音訊檔案轉文字")
+def transcribe_file(
+    file: UploadFile = File(..., description="上傳音訊檔案（如 m4a, mp3, wav）"),
+    language: str = Form("", description=_LANG_DESC),
+    batch_size: int = Form(0, description=_BATCH_DESC),
+    topic: str = Form("", description="transcript 的 topic 欄位；留空用檔案名稱"),
+    container: Container = Depends(get_container),
+) -> JobCreated:
+    """上傳一個音訊檔案加入轉檔佇列。立即回傳 `job_id`，請輪詢 `GET /job/{job_id}` 取得結果。"""
+    filename = file.filename or ""
+    ext = Path(filename).suffix.lower()
+    valid_exts = {".mp3", ".m4a", ".aac", ".ogg", ".wav", ".mp4", ".flac"}
+    if ext not in valid_exts:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支援的檔案格式 {ext}，請上傳 {', '.join(valid_exts)} 等格式",
+        )
+
+    # 建立暫存檔並寫入內容
+    upload_dir = Path(os.environ.get("UPLOAD_DIR", "/data/uploads"))
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    actual_topic = topic or Path(filename).stem
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext, dir=upload_dir) as tmp_file:
+        tmp_path = Path(tmp_file.name)
+        try:
+            shutil.copyfileobj(file.file, tmp_file)
+        except Exception:
+            tmp_path.unlink(missing_ok=True)
+            raise
+
+    try:
+        job = container.job_service.create(
+            job_type=JobType.FILE,
+            source=LocalFileSource(tmp_path, actual_topic),
+            topic=actual_topic,
+            language=language,
+            batch_size=batch_size,
+        )
+    except Exception:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    return JobCreated(job_id=job.id, status=job.status.value)

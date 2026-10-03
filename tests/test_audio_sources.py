@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.infrastructure.audio_sources import (
     DirectUrlSource,
+    LocalFileSource,
     YtDlpSource,
 )
 
@@ -38,3 +39,19 @@ def test_direct_url_source_passes_title_to_downloader(tmp_path):
     with source.acquire() as path:
         assert path.exists()
     assert seen == {"url": "http://feed/ep.mp3", "name_hint": "第一集"}
+
+
+def test_local_file_source_preserves_file_until_cleanup(tmp_path):
+    file_path = tmp_path / "test.m4a"
+    file_path.write_bytes(b"audio data")
+
+    source = LocalFileSource(file_path, "測試檔案")
+    assert source.display_name == "測試檔案"
+
+    with source.acquire() as path:
+        assert path == file_path
+        assert path.exists()
+
+    assert file_path.exists()
+    source.cleanup()
+    assert not file_path.exists()

@@ -16,8 +16,11 @@ class AudioSource(ABC):
     """一個能提供本地音檔路徑的來源。
 
     `acquire()` 是 context manager：進入時保證有一個可讀的本地音檔，
-    離開時負責清掉暫存 (下載的檔案、上傳的暫存檔等)。
+    離開時清掉下載暫存；持久化上傳音檔由 cleanup() 清理。
     """
+
+    def cleanup(self) -> None:
+        """釋放持久化來源；成功或刪除任務後呼叫。"""
 
     @property
     @abstractmethod

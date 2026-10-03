@@ -8,3 +8,6 @@ requests==2.32.3
 feedparser==6.0.11
 httpx
 pytest
+
+psycopg[binary]==3.2.3
+psycopg_pool==3.2.4

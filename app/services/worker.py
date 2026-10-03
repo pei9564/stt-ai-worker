@@ -19,21 +19,28 @@ class TranscriptionWorker:
         self._jobs = job_service
         self._transcription = transcription_service
         self._thread: threading.Thread | None = None
+        self._stopping = threading.Event()
+
+    @property
+    def is_alive(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
 
     def start(self) -> None:
         """啟動 worker thread。"""
+        self._stopping.clear()
         self._thread = threading.Thread(target=self._loop, daemon=True, name="stt-ai-worker")
         self._thread.start()
 
     def stop(self) -> None:
         """通知 worker 結束並等待 thread 收尾。"""
+        self._stopping.set()
         self._jobs.request_shutdown()
         if self._thread is not None:
             self._thread.join(timeout=5)
 
     def _loop(self) -> None:
         log.info("worker thread started")
-        while True:
+        while not self._stopping.is_set():
             job_id = self._jobs.dequeue()
             try:
                 if job_id is None:  # 關閉訊號
@@ -53,6 +60,11 @@ class TranscriptionWorker:
             result = self._transcription.process(job)
             self._jobs.mark_done(job_id, result)
             log.info("job %s 完成 → transcript #%d", job_id, result.transcript_id)
+            if job.source is not None:
+                try:
+                    job.source.cleanup()
+                except OSError:
+                    log.exception("job %s 音檔清理失敗", job_id)
         except Exception as e:
             self._jobs.mark_error(job_id, str(e))
             log.error("job %s 失敗: %s", job_id, e)

@@ -32,3 +32,6 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 
 CREATE INDEX IF NOT EXISTS jobs_created_at_idx ON jobs (created_at DESC);
+
+-- 向後相容：舊 jobs 保留，缺少來源的未完成任務會標記 error。
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS source JSONB;

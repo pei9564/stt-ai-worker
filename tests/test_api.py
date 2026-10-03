@@ -91,3 +91,77 @@ def test_end_to_end_url_transcription(settings, monkeypatch):
         assert result["status"] == "done"
         assert result["text"] == "你好\n世界"
         assert result["transcript_id"] is not None
+
+
+def test_transcribe_file_queues_job(client):
+    import io
+    file_content = b"fake audio content"
+    resp = client.post(
+        "/transcribe_file",
+        data={"language": "zh", "topic": "測試上傳"},
+        files={"file": ("test.m4a", io.BytesIO(file_content), "audio/mp4")},
+    )
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["status"] == "queued"
+
+    # job 出現在清單與單筆查詢中
+    listed = client.get("/jobs").json()
+    assert [j["id"] for j in listed["jobs"]] == [body["job_id"]]
+    assert client.get(f"/job/{body['job_id']}").json()["status"] == "queued"
+
+
+def test_end_to_end_file_transcription(settings):
+    """測試上傳檔案 → 佇列 → worker → 完成的端到端路徑。"""
+    import io
+    app = create_app(
+        settings,
+        transcriber=FakeTranscriber(),
+        job_repository=InMemoryJobRepository(),
+        transcript_repository=InMemoryTranscriptRepository(),
+        run_worker=True,
+    )
+    with TestClient(app) as client:
+        file_content = b"fake audio content"
+        job_id = client.post(
+            "/transcribe_file",
+            data={"language": "zh", "topic": "測試上傳"},
+            files={"file": ("test.m4a", io.BytesIO(file_content), "audio/mp4")},
+        ).json()["job_id"]
+
+        deadline = time.time() + 5
+        status = "queued"
+        while time.time() < deadline and status in ("queued", "running"):
+            time.sleep(0.02)
+            status = client.get(f"/job/{job_id}").json()["status"]
+
+        result = client.get(f"/job/{job_id}").json()
+        assert result["status"] == "done"
+        assert result["text"] == "你好\n世界"
+        assert result["transcript_id"] is not None
+
+
+
+def test_probes_reject_missing_worker(client):
+    assert client.get("/healthz").status_code == 503
+    assert client.get("/readyz").status_code == 503
+
+
+def test_probes_separate_db_failure_from_worker_health(settings, monkeypatch):
+    repo = InMemoryJobRepository()
+    app = create_app(settings, transcriber=FakeTranscriber(), job_repository=repo,
+                     transcript_repository=InMemoryTranscriptRepository())
+    with TestClient(app) as client:
+        assert client.get("/healthz").status_code == 200
+        assert client.get("/readyz").status_code == 200
+        def unavailable(job_id):
+            raise RuntimeError("DB unavailable")
+        monkeypatch.setattr(repo, "get", unavailable)
+        assert client.get("/readyz").status_code == 503
+        assert client.get("/healthz").status_code == 200
+
+
+def test_retry_rejects_unknown_or_queued_job(client):
+    assert client.post("/job/missing/retry").status_code == 404
+    job_id = client.post("/transcribe_url", data={"url": "https://youtube/x"}).json()["job_id"]
+    assert client.post(f"/job/{job_id}/retry").status_code == 409

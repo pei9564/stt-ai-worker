@@ -61,3 +61,33 @@ def test_worker_thread_drains_queue():
         worker.stop()
 
     assert job_service.get(job.id).status == JobStatus.DONE
+
+
+def test_shutdown_does_not_start_remaining_jobs():
+    import threading
+
+    started = threading.Event()
+    release = threading.Event()
+    svc = JobService(InMemoryJobRepository(), jobs_window_hours=48)
+
+    class BlockingTranscriber(FakeTranscriber):
+        def transcribe(self, *args):
+            started.set()
+            assert release.wait(3)
+            return super().transcribe(*args)
+
+    transcription = TranscriptionService(BlockingTranscriber(), InMemoryTranscriptRepository(),
+                                         default_language="zh", default_batch_size=4)
+    worker = TranscriptionWorker(svc, transcription)
+    first = svc.create(job_type=JobType.FILE, source=FakeAudioSource(), topic="first", language="zh", batch_size=4)
+    second = svc.create(job_type=JobType.FILE, source=FakeAudioSource(), topic="second", language="zh", batch_size=4)
+    worker.start()
+    assert started.wait(3)
+    stopped = threading.Thread(target=worker.stop)
+    stopped.start()
+    assert worker._stopping.wait(3)
+    release.set()
+    stopped.join(timeout=3)
+    assert not worker.is_alive
+    assert svc.get(first.id).status == JobStatus.DONE
+    assert svc.get(second.id).status == JobStatus.QUEUED

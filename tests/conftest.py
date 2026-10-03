@@ -81,3 +81,8 @@ def transcripts():
     from app.infrastructure.transcript_repository import InMemoryTranscriptRepository
 
     return InMemoryTranscriptRepository()
+
+
+@pytest.fixture(autouse=True)
+def upload_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("UPLOAD_DIR", str(tmp_path / "uploads"))

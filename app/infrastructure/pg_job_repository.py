@@ -5,16 +5,18 @@
 
 from __future__ import annotations
 
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 from app.domain.job import Job, JobResult, JobStatus, JobType
+from app.infrastructure.audio_sources import deserialize_source, serialize_source
 
 # SELECT 預設帶 LEFT JOIN,完成的 job 一次撈出 transcript 內容
 _SELECT_COLS = """
     j.id, j.type, j.topic, j.language, j.batch_size, j.status,
     j.created_at, j.started_at, j.finished_at,
     j.transcript_id, j.error,
-    t.language, t.duration, t.text, t.srt
+    t.language, t.duration, t.text, t.srt, j.source
 """
 
 
@@ -23,7 +25,7 @@ def _row_to_job(row: tuple) -> Job:
         jid, jtype, topic, language, batch_size, status,
         created_at, started_at, finished_at,
         transcript_id, error,
-        t_language, t_duration, t_text, t_srt,
+        t_language, t_duration, t_text, t_srt, source,
     ) = row
 
     result: JobResult | None = None
@@ -48,6 +50,7 @@ def _row_to_job(row: tuple) -> Job:
         finished_at=finished_at,
         result=result,
         error=error,
+        source=deserialize_source(source),
     )
 
 
@@ -59,21 +62,23 @@ class PostgresJobRepository:
 
     def save(self, job: Job) -> None:
         tid = job.result.transcript_id if job.result else None
+        source = serialize_source(job.source)
         with self._pool.connection() as conn, conn.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO jobs (
                     id, type, topic, language, batch_size, status,
                     created_at, started_at, finished_at,
-                    transcript_id, error
+                    transcript_id, error, source
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET
                     status        = EXCLUDED.status,
                     started_at    = EXCLUDED.started_at,
                     finished_at   = EXCLUDED.finished_at,
                     transcript_id = EXCLUDED.transcript_id,
-                    error         = EXCLUDED.error
+                    error         = EXCLUDED.error,
+                    source        = EXCLUDED.source
                 """,
                 (
                     job.id,
@@ -87,6 +92,7 @@ class PostgresJobRepository:
                     job.finished_at,
                     tid,
                     job.error,
+                    Jsonb(source) if source is not None else None,
                 ),
             )
 

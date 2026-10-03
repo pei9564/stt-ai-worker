@@ -229,3 +229,6 @@ models/
 
 # HuggingFace cache 預設位置 (HF_CACHE_DIR 未設時 fallback)
 hf_cache/
+
+# 持久化上傳音檔（本地開發）
+uploads/

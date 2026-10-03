@@ -38,15 +38,15 @@ class JobResult:
 
 
 def _now() -> datetime.datetime:
-    return datetime.datetime.now()
+    return datetime.datetime.now(datetime.timezone.utc)
 
 
 @dataclass
 class Job:
     """一筆轉檔任務。
 
-    `source` 是處理時才需要的音檔來源，不會被持久化 —— 服務重啟後從磁碟
-    載入的 job 其 `source` 為 None，因此無法被重跑 (會被標記為 error)。
+    `source` 由 repository 以 JSON 描述持久化，重啟後可還原及重新排隊。
+    舊版缺少來源的任務仍可查詢，但無法重試。
     """
 
     id: str

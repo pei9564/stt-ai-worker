@@ -67,7 +67,11 @@ def create_app(
     # 只在「兩個 repo 都沒被注入」時才開 PG pool;測試路徑完全不碰 PG。
     pool: ConnectionPool | None = None
     if job_repository is None or transcript_repository is None:
-        pool = ConnectionPool(settings.db_url, min_size=1, max_size=4, open=False)
+        pool = ConnectionPool(
+            settings.db_url, min_size=1, max_size=4, timeout=3,
+            kwargs={"connect_timeout": 3, "options": "-c statement_timeout=3000"},
+            open=False,
+        )
 
     if job_repository is None:
         job_repository = PostgresJobRepository(pool)  # type: ignore[arg-type]
@@ -112,8 +116,12 @@ def create_app(
         yield
         if run_worker:
             worker.stop()
-        if pool is not None:
+        if pool is not None and not worker.is_alive:
             pool.close()
+        elif pool is not None:
+            # 長任務尚在執行時不要提早關閉它使用的連線池。
+            # daemon thread 隨 process 終止；未完成任務由下一次啟動恢復。
+            log.warning("worker still running at shutdown; leaving pool open until process exit")
 
     app = FastAPI(
         title="STT Service",

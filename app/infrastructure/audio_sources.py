@@ -90,6 +90,32 @@ class DirectUrlSource(AudioSource):
             yield self._downloader(self._audio_url, Path(tmp), self._title)
 
 
+class LocalFileSource(AudioSource):
+    """本地音檔來源（例如直接上傳的檔案）。
+
+    檔案已由 API 寫入本地暫存位置，acquire() 只需要 yield 該路徑，
+    保留檔案供失敗重試；成功或刪除任務後由 cleanup() 清理。
+    """
+
+    def __init__(self, file_path: Path, display_name: str):
+        self._file_path = Path(file_path)
+        self._display_name = display_name
+
+    @property
+    def display_name(self) -> str:
+        return self._display_name
+
+    @contextmanager
+    def acquire(self) -> Iterator[Path]:
+        if not self._file_path.is_file():
+            raise RuntimeError("上傳音檔已不存在，請重新上傳")
+        yield self._file_path
+
+    def cleanup(self) -> None:
+        self._file_path.unlink(missing_ok=True)
+
+
+
 # ---- RSS feed 解析 ----
 @dataclass(frozen=True)
 class FeedEpisode:
@@ -127,3 +153,28 @@ def parse_feed(feed_url: str, limit: int) -> list[FeedEpisode]:
     if parsed.bozo and not parsed.entries:
         raise RuntimeError(f"RSS 解析失敗: {parsed.bozo_exception}")
     return extract_episodes(parsed.entries, limit)
+
+
+def serialize_source(source: AudioSource | None) -> dict | None:
+    """只持久化來源描述，不儲存 downloader 或 Python 物件。"""
+    if source is None:
+        return None
+    if isinstance(source, YtDlpSource):
+        return {"kind": "ytdlp", "url": source._url}
+    if isinstance(source, DirectUrlSource):
+        return {"kind": "direct", "url": source._audio_url, "title": source._title}
+    if isinstance(source, LocalFileSource):
+        return {"kind": "file", "path": str(source._file_path), "title": source.display_name}
+    raise ValueError(f"來源不支援持久化: {type(source).__name__}")
+
+
+def deserialize_source(data: dict | None) -> AudioSource | None:
+    if not data:
+        return None
+    if data["kind"] == "ytdlp":
+        return YtDlpSource(data["url"])
+    if data["kind"] == "direct":
+        return DirectUrlSource(data["url"], data["title"])
+    if data["kind"] == "file":
+        return LocalFileSource(Path(data["path"]), data["title"])
+    raise ValueError(f"未知音訊來源: {data['kind']}")

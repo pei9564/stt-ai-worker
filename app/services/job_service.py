@@ -59,7 +59,7 @@ class JobService:
     def list_recent(self, hours: int | None = None) -> list[Job]:
         """回傳時間窗內的 job，最新在前。"""
         window = self._window_hours if hours is None else hours
-        cutoff = datetime.datetime.now() - datetime.timedelta(hours=window)
+        cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=window)
         with self._lock:
             jobs = [j for j in self._repo.all() if j.created_at >= cutoff]
         jobs.reverse()
@@ -84,18 +84,45 @@ class JobService:
             self._repo.save(job)
 
     def recover_interrupted(self) -> None:
-        """把載入時仍為 queued / running 的 job 標記為 error (服務重啟未完成)。"""
+        """恢復 queued / running 任務；舊版沒有來源的紀錄標記 error。"""
         with self._lock:
             for job in self._repo.all():
                 if job.status in (JobStatus.QUEUED, JobStatus.RUNNING):
-                    job.mark_error("服務重啟，job 未完成")
+                    if job.source is None:
+                        job.mark_error("任務缺少音檔來源，請重新提交")
+                    else:
+                        self._reset(job)
                     self._repo.save(job)
+                    if job.status == JobStatus.QUEUED:
+                        self._queue.put(job.id)
+
+    @staticmethod
+    def _reset(job: Job) -> None:
+        job.status = JobStatus.QUEUED
+        job.started_at = None
+        job.finished_at = None
+        job.error = None
+        job.result = None
+
+    def retry(self, job_id: str) -> bool:
+        """僅重新排隊失敗任務，避免重複執行 queued / running / done。"""
+        with self._lock:
+            job = self._repo.get(job_id)
+            if job is None or job.status != JobStatus.ERROR or job.source is None:
+                return False
+            self._reset(job)
+            self._repo.save(job)
+            self._queue.put(job.id)
+        return True
 
     def delete(self, job_id: str) -> bool:
         """從 repo 刪除一筆 job 紀錄。回傳 True 表示存在並已刪除。"""
         with self._lock:
-            if self._repo.get(job_id) is None:
+            job = self._repo.get(job_id)
+            if job is None:
                 return False
+            if job.source is not None:
+                job.source.cleanup()
             self._repo.delete(job_id)
         return True
 

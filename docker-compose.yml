@@ -26,6 +26,7 @@ services:
       # HF_CACHE_DIR: host 上的 HuggingFace model cache,避免每次重啟都重下載權重
       # 預設 ./hf_cache (compose 檔旁邊),也可指向系統共用 cache
       - ${HF_CACHE_DIR:-./hf_cache}:/root/.cache/huggingface
+      - stt_uploads:/data/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -41,4 +42,5 @@ services:
               capabilities: [gpu]
 
 volumes:
+  stt_uploads:
   pg_data:

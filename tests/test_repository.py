@@ -12,7 +12,7 @@ def _job(job_id, status=JobStatus.QUEUED, result=None):
         language="zh",
         batch_size=4,
         status=status,
-        created_at=datetime.datetime(2026, 5, 15, 10, 0, 0),
+        created_at=datetime.datetime(2026, 5, 15, 10, 0, 0, tzinfo=datetime.timezone.utc),
         result=result,
     )
 
