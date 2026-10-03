@@ -106,17 +106,14 @@ def test_legacy_unfinished_job_becomes_error(pool):
 def test_default_app_url_submission_completes_with_pg(pool, settings, monkeypatch):
     """正式 app 自行開 PG pool；只替換下載及 GPU 推論。"""
     from dataclasses import replace
-    from app.infrastructure import audio_sources
-
-    from types import SimpleNamespace
 
     seen = []
-    def download(command, **kwargs):
-        seen.append(command[-1])
-        path = Path(command[command.index("-o") + 1]).parent / "episode.mp3"
+    def download(url, dest):
+        seen.append(url)
+        path = dest / "episode.mp3"
         path.write_bytes(b"audio")
-        return SimpleNamespace(returncode=0, stdout=str(path), stderr="")
-    monkeypatch.setattr(audio_sources.subprocess, "run", download)
+        return path
+    monkeypatch.setattr(YtDlpSource.__init__, '__defaults__', (download,))
     app = create_app(replace(settings, db_url=os.environ["TEST_PG_DSN"]), transcriber=FakeTranscriber())
     with TestClient(app) as client:
         job_id = client.post("/transcribe_url", data={"url": "https://example.com/episode.mp3"}).json()["job_id"]

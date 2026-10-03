@@ -85,7 +85,10 @@ def create_app(
 
     job_service = JobService(job_repository, jobs_window_hours=settings.jobs_window_hours,
                              max_pending_jobs=settings.max_pending_jobs,
-                             profile=f"{settings.model}|{settings.language}|{settings.batch_size}")
+                             profile=f"{settings.model}|{settings.compute_type}|{settings.language}|{settings.batch_size}",
+                             model_config={'model': settings.model, 'compute_type': settings.compute_type,
+                                           'default_language': settings.language,
+                                           'default_batch_size': settings.batch_size})
     audio_probe = None
 
     if transcriber is None:

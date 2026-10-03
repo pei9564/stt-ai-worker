@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.domain.job import Job, JobStatus
 
@@ -43,6 +43,7 @@ class JobView(BaseModel):
     srt: str | None = None
     transcript_id: int | None = None
     error: str | None = None
+    provenance: dict = Field(default_factory=dict)
     stage: str = 'queued'
     progress: int | None = None
     error_code: str | None = None
@@ -92,7 +93,17 @@ def to_job_view(job: Job, *, include_text: bool) -> JobView:
 
     include_text=False (清單) 時，done 的 job 只附 transcript_id，不附逐字稿全文。
     """
+    from app.infrastructure.audio_sources import serialize_source
+    try:
+        source = serialize_source(job.source) or {}
+    except ValueError:
+        source = {'kind': 'custom'}
+    source.pop('path', None)  # never expose server filesystem paths
     view = JobView(
+        provenance={'source': source, 'model_profile': job.details.get('model_profile'),
+                    'model_config': job.details.get('model_config'),
+                    'requested_language': job.language, 'batch_size': job.batch_size,
+                    'input_truncated': False},
         id=job.id,
         type=job.type.value,
         status=job.status.value,

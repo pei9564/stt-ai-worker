@@ -31,7 +31,8 @@ class QueueFullError(ValueError):
 class JobService:
     """job 生命週期的單一進入點。"""
 
-    def __init__(self, repo: JobRepository, *, jobs_window_hours: int, max_pending_jobs: int = 20, profile: str = "default"):
+    def __init__(self, repo: JobRepository, *, jobs_window_hours: int, max_pending_jobs: int = 20, profile: str = "default", model_config: dict | None = None):
+        self._model_config = model_config or {}
         self._profile = profile
         self._repo = repo
         self._window_hours = jobs_window_hours
@@ -77,7 +78,8 @@ class JobService:
     def create_many(self, specs: list[dict]) -> list[Job]:
         with self._lock:
             existing = {j.details.get('dedupe_key'): j for j in self._repo.all()
-                        if j.status != JobStatus.ERROR and j.details.get('dedupe_key')}
+                        if (j.status in (JobStatus.QUEUED, JobStatus.RUNNING) or
+                            j.status == JobStatus.DONE and j.result is not None) and j.details.get('dedupe_key')}
             accepted, fresh, redundant = [], [], []
             for spec in specs:
                 key = self._key(spec)
@@ -87,7 +89,8 @@ class JobService:
                         redundant.append(spec['source'])
                     continue
                 job = Job(id=uuid.uuid4().hex[:12],
-                          details={'request_id': request_id_var.get(), 'dedupe_key': key}, **spec)
+                          details={'request_id': request_id_var.get(), 'dedupe_key': key,
+                                   'model_profile': self._profile, 'model_config': self._model_config}, **spec)
                 fresh.append(job)
                 accepted.append(job)
                 if key:

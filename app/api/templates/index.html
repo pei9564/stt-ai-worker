@@ -517,6 +517,14 @@ async function renderJobs() {
 
       if (j.status === 'done') {
         row.onclick = () => viewJobResult(j.id);
+        for (const [format, label] of [['json','JSON'], ['markdown','Markdown'], ['srt','SRT']]) {
+          const link = document.createElement('a');
+          link.href = '/job/' + encodeURIComponent(j.id) + '/export?format=' + format;
+          link.textContent = label;
+          link.className = 'btn-sm';
+          link.onclick = e => e.stopPropagation();
+          actions.appendChild(link);
+        }
       } else if (j.status === 'queued') {
         const cancelBtn = document.createElement('button');
         cancelBtn.textContent = '取消';
@@ -548,7 +556,7 @@ async function renderJobs() {
         actions.appendChild(retryBtn);
         const errEl = document.createElement('span');
         errEl.className = 'job-error';
-        errEl.textContent = (j.error || '') + ' · ' + (j.retry_hint || '');
+        errEl.textContent = (j.error || '') + (j.retry_hint ? ' · ' + j.retry_hint : '');
         row.appendChild(badge);
         row.appendChild(titleEl);
         row.appendChild(metaEl);

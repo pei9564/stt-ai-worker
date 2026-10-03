@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import os
 import hashlib
+import json
 import tempfile
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from app.api.deps import get_container
 from app.api.schemas import (
@@ -278,3 +279,24 @@ def prune(days: int = 7, dry_run: bool = True, container: Container = Depends(ge
         raise HTTPException(422, detail='days 必須至少 1')
     return container.job_service.prune_failed(days=days, dry_run=dry_run,
                      upload_dir=Path(os.getenv('UPLOAD_DIR', '/data/uploads')))
+
+
+@router.get('/job/{job_id}/export', tags=['任務查詢'])
+def export_job(job_id: str, format: str = 'json', container: Container = Depends(get_container)):
+    job = container.job_service.get(job_id)
+    if job is None:
+        raise HTTPException(404, detail='job not found')
+    if job.status.value != 'done' or job.result is None:
+        raise HTTPException(409, detail='工作完成後才能匯出')
+    data = to_job_view(job, include_text=True).model_dump()
+    if format == 'json':
+        content, media, ext = json.dumps(data, ensure_ascii=False, indent=2), 'application/json', 'json'
+    elif format == 'markdown':
+        content = '# ' + (job.topic or job.id) + '\n\n' + '```json\n' + json.dumps(data['provenance'], ensure_ascii=False, indent=2) + '\n```\n\n完成時間：' + (data['finished_at'] or '') + '\n\n' + job.result.text
+        media, ext = 'text/markdown', 'md'
+    elif format == 'srt':
+        content, media, ext = job.result.srt, 'application/x-subrip', 'srt'
+    else:
+        raise HTTPException(422, detail='format: json / markdown / srt')
+    return Response(content, media_type=media,
+                    headers={'Content-Disposition': f'attachment; filename="transcript.{ext}"'})
